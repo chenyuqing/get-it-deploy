@@ -20,7 +20,7 @@ import {
 import PdfViewer, { type Tag } from "@/components/PdfViewer";
 import Visualizer from "@/components/Visualizer";
 import type { DetectedConcept, VizSpec, VizType } from "@/lib/schemas";
-import { AUTO_GENERATE_VIZ } from "@/lib/config";
+import { AUTO_GENERATE_VIZ, MAX_VIZ_GEN_RETRIES } from "@/lib/config";
 import {
   clearDocState,
   loadDocState,
@@ -50,6 +50,10 @@ type TagState = Tag & {
   concept: DetectedConcept;
   spec?: VizSpec;
   error?: string;
+  /** Number of completed generation calls so far (1 = initial, 2+ = retries). */
+  attempts?: number;
+  /** Last runtime error reported by the visualizer; sent back to codex on retry. */
+  lastRuntimeError?: string;
 };
 
 const FILENAME_TO_TITLE: Record<string, string> = {
@@ -132,6 +136,10 @@ export default function ViewerClient({ docId }: { docId: string }) {
   const cancelledRef = useRef(false);
   // Did we already kick the queue once for resumed-on-reload generations?
   const resumedRef = useRef(false);
+  // Mirror of the most recent state — used by event handlers that fire
+  // outside of React's render cycle (pagehide flush, runtime-error retry).
+  const tagsRef = useRef<TagState[]>([]);
+  // (assignments to .current happen below, after `tags` is in scope)
 
   // ── Helpers ──────────────────────────────────────────────────────────
   const pumpVizQueue = useCallback(() => {
@@ -143,6 +151,13 @@ export default function ViewerClient({ docId }: { docId: string }) {
       vizInflightRef.current++;
       const ctrl = new AbortController();
       ctrlsRef.current.push(ctrl);
+      // If this tag is a retry (previous spec exists + a runtime error was
+      // captured), hand the broken code + error back to codex as repair
+      // context. The route bumps reasoning.effort for repair calls.
+      const previousAttempt =
+        next.spec && next.lastRuntimeError
+          ? { spec: next.spec, runtimeError: next.lastRuntimeError }
+          : undefined;
       fetch("/api/generate-viz", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -151,6 +166,7 @@ export default function ViewerClient({ docId }: { docId: string }) {
           label: next.concept.label,
           context: next.concept.context,
           docTitle,
+          previousAttempt,
         }),
         signal: ctrl.signal,
       })
@@ -165,7 +181,17 @@ export default function ViewerClient({ docId }: { docId: string }) {
           if (cancelledRef.current) return;
           setTags((prev) =>
             prev.map((t) =>
-              t.id === next.id ? { ...t, spec, ready: true, generating: false } : t,
+              t.id === next.id
+                ? {
+                    ...t,
+                    spec,
+                    ready: true,
+                    generating: false,
+                    attempts: (t.attempts ?? 0) + 1,
+                    lastRuntimeError: undefined,
+                    error: undefined,
+                  }
+                : t,
             ),
           );
         })
@@ -198,7 +224,10 @@ export default function ViewerClient({ docId }: { docId: string }) {
   const enqueueTagForGen = useCallback(
     (tag: TagState) => {
       if (enqueuedRef.current.has(tag.id)) return;
-      if (tag.spec || tag.error) return;
+      // Skip if already finished. A tag that is being repaired keeps spec
+      // around as repair context, so we DON'T bail just because spec exists.
+      if (tag.error) return;
+      if (tag.spec && !tag.lastRuntimeError) return;
       enqueuedRef.current.add(tag.id);
       vizQueueRef.current.push(tag);
       setTags((prev) =>
@@ -207,6 +236,50 @@ export default function ViewerClient({ docId }: { docId: string }) {
       pumpVizQueue();
     },
     [pumpVizQueue],
+  );
+
+  // ── Visualizer crashed on a spec — ask codex to fix it ───────────────
+  // Read decisions OUT of the reducer: React's setState reducer can run
+  // multiple times in dev StrictMode, and any side effect there is a bug.
+  // We look up the live tag from tagsRef (kept in sync each render) and
+  // decide synchronously whether we still have budget for a retry.
+  // The visualizer reports a runtime error. We synchronously consult
+  // tagsRef (kept in sync each render) to decide whether to retry, and
+  // pass the freshly-built repair tag straight into enqueueTagForGen
+  // rather than waiting for React to commit the setState.
+  const handleRuntimeError = useCallback(
+    (tagId: string, message: string) => {
+      const tag = tagsRef.current.find((t) => t.id === tagId);
+      if (!tag) return;
+      const attemptsSoFar = tag.attempts ?? 1;
+      if (attemptsSoFar > MAX_VIZ_GEN_RETRIES) {
+        setTags((prev) =>
+          prev.map((t) =>
+            t.id === tagId
+              ? {
+                  ...t,
+                  ready: false,
+                  generating: false,
+                  error: `Visualization failed after ${attemptsSoFar} attempts: ${message}`,
+                  lastRuntimeError: message,
+                }
+              : t,
+          ),
+        );
+        return;
+      }
+      // Construct the repair-state tag directly so we can enqueue with
+      // lastRuntimeError set without waiting for React to commit.
+      const repairTag: TagState = {
+        ...tag,
+        ready: false,
+        generating: true,
+        lastRuntimeError: message,
+      };
+      setTags((prev) => prev.map((t) => (t.id === tagId ? repairTag : t)));
+      enqueueTagForGen(repairTag);
+    },
+    [enqueueTagForGen],
   );
 
   // ── Page-by-page concept detection (skipping any already done) ───────
@@ -354,8 +427,8 @@ export default function ViewerClient({ docId }: { docId: string }) {
   // Final save on page hide / reload — runs synchronously before the doc
   // unloads so the latest state always lands in sessionStorage. We use
   // pagehide rather than beforeunload because the latter is unreliable
-  // on mobile and on bfcache restores.
-  const tagsRef = useRef(tags);
+  // on mobile and on bfcache restores. tagsRef itself was hoisted earlier
+  // so that the runtime-error retry handler can read fresh state too.
   const activeTagIdRef = useRef(activeTagId);
   const pagesAnalyzedRef = useRef(pagesAnalyzed);
   tagsRef.current = tags;
@@ -523,8 +596,21 @@ export default function ViewerClient({ docId }: { docId: string }) {
         <div className="flex w-[44%] min-w-[420px] max-w-[720px] flex-col overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-white">
           <div className="min-h-0 flex-1">
             <Visualizer
-              spec={activeSpec}
-              loading={activeTag != null && !activeTag.spec && !activeTag.error}
+              // While retrying, hide the broken spec so the loader shows.
+              // We still keep the spec on the tag itself for repair context.
+              spec={activeTag?.generating ? null : activeSpec}
+              loading={
+                activeTag != null && !activeTag.error &&
+                (activeTag.generating || !activeTag.spec)
+              }
+              loadingDetail={
+                activeTag?.generating && (activeTag.attempts ?? 0) >= 1
+                  ? `repairing — attempt ${(activeTag.attempts ?? 0) + 1} of ${MAX_VIZ_GEN_RETRIES + 1}`
+                  : undefined
+              }
+              onRuntimeError={
+                activeTag ? (msg) => handleRuntimeError(activeTag.id, msg) : undefined
+              }
               emptyHint={
                 tags.length === 0
                   ? "codex is reading the document — tags will appear inline as soon as they're detected."
