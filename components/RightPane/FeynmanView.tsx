@@ -1,26 +1,34 @@
 "use client";
 
 /**
- * Feynman method.
+ * Feynman method — voice mode.
  *
- * The user explains a topic in plain language. The agent asks short guided
- * questions that expose unclear parts, then the session ends with feedback.
+ * The agent reads the child prompt aloud (TTS); the student answers by
+ * speaking. The orb visualizes voice peaks while listening and a soft
+ * pulse while the agent is talking. The transcript and history are still
+ * rendered as text so the conversation is reviewable.
  */
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   BookOpenCheck,
   CheckCircle2,
   Lightbulb,
-  MessageCircleQuestionMark,
-  PencilLine,
   RefreshCw,
-  Send,
   Sparkles,
   Trash2,
+  Volume2,
 } from "lucide-react";
 import type { FeynmanSession } from "@/lib/work-context-types";
 import { consumePrefill } from "./prefill";
+import VoiceBlob, { type BlobState } from "./VoiceBlob";
 
 type Props = { docId: string };
 
@@ -40,7 +48,6 @@ export default function FeynmanView({ docId }: Props) {
   const [topic, setTopic] = useState("");
   const [pendingChildPrompt, setPendingChildPrompt] = useState<string | null>(null);
   const [pendingBySession, setPendingBySession] = useState<Record<string, string | null>>({});
-  const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [maxTurns, setMaxTurns] = useState(4);
@@ -69,6 +76,16 @@ export default function FeynmanView({ docId }: Props) {
   const start = useCallback(async () => {
     const t = topic.trim();
     if (!t) return;
+    if (typeof window !== "undefined" && window.speechSynthesis) {
+      try {
+        const warm = new SpeechSynthesisUtterance(" ");
+        warm.volume = 0;
+        window.speechSynthesis.cancel();
+        window.speechSynthesis.speak(warm);
+      } catch {
+        // ignore
+      }
+    }
     setBusy(true);
     setError(null);
     try {
@@ -86,7 +103,6 @@ export default function FeynmanView({ docId }: Props) {
       setActiveId(j.session.id);
       setPendingChildPrompt(j.childPrompt);
       setPendingBySession((prev) => ({ ...prev, [j.session.id]: j.childPrompt }));
-      setDraft("");
       setMaxTurns(j.maxTurns);
       setTopic("");
     } catch (e) {
@@ -96,61 +112,65 @@ export default function FeynmanView({ docId }: Props) {
     }
   }, [docId, topic]);
 
-  const explain = useCallback(async () => {
-    if (!active || !pendingChildPrompt) return;
-    const text = draft.trim();
-    if (!text) return;
-    setBusy(true);
-    setError(null);
-    setSessions((prev) =>
-      prev
-        ? prev.map((s) =>
-            s.id === active.id
-              ? {
-                  ...s,
-                  turns: [
-                    ...s.turns,
-                    { childPrompt: pendingChildPrompt, userExplanation: text, ts: Date.now() },
-                  ],
-                }
-              : s,
-          )
-        : prev,
-    );
-    setDraft("");
-    setPendingChildPrompt(null);
-    setPendingBySession((prev) => ({ ...prev, [active.id]: null }));
-    try {
-      const r = await fetch(`/api/feynman/${docId}`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          action: "explain",
-          sessionId: active.id,
-          userExplanation: text,
-          childPrompt: pendingChildPrompt,
-        }),
-      });
-      if (!r.ok) {
-        const txt = await r.text().catch(() => "");
-        throw new Error(`explain failed (${r.status}): ${txt.slice(0, 120)}`);
-      }
-      const j = (await r.json()) as ExplainResp;
+  const submitExplanation = useCallback(
+    async (text: string) => {
+      if (!active || !pendingChildPrompt) return;
+      const trimmed = text.trim();
+      if (!trimmed) return;
+      setBusy(true);
+      setError(null);
+      const sessionId = active.id;
+      const usedPrompt = pendingChildPrompt;
       setSessions((prev) =>
-        prev ? prev.map((s) => (s.id === active.id ? j.session : s)) : prev,
+        prev
+          ? prev.map((s) =>
+              s.id === sessionId
+                ? {
+                    ...s,
+                    turns: [
+                      ...s.turns,
+                      { childPrompt: usedPrompt, userExplanation: trimmed, ts: Date.now() },
+                    ],
+                  }
+                : s,
+            )
+          : prev,
       );
-      if (j.done) {
-        setPendingBySession((prev) => ({ ...prev, [active.id]: null }));
-      } else {
-        setPendingChildPrompt(j.childPrompt);
-        setPendingBySession((prev) => ({ ...prev, [active.id]: j.childPrompt }));
+      setPendingChildPrompt(null);
+      setPendingBySession((prev) => ({ ...prev, [sessionId]: null }));
+      try {
+        const r = await fetch(`/api/feynman/${docId}`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            action: "explain",
+            sessionId,
+            userExplanation: trimmed,
+            childPrompt: usedPrompt,
+          }),
+        });
+        if (!r.ok) {
+          const txt = await r.text().catch(() => "");
+          throw new Error(`explain failed (${r.status}): ${txt.slice(0, 120)}`);
+        }
+        const j = (await r.json()) as ExplainResp;
+        setSessions((prev) =>
+          prev ? prev.map((s) => (s.id === sessionId ? j.session : s)) : prev,
+        );
+        if (j.done) {
+          setPendingBySession((prev) => ({ ...prev, [sessionId]: null }));
+        } else {
+          setPendingChildPrompt(j.childPrompt);
+          setPendingBySession((prev) => ({ ...prev, [sessionId]: j.childPrompt }));
+        }
+      } catch (e) {
+        setError((e as Error).message);
+      } finally {
+        setBusy(false);
       }
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }, [active, docId, draft, pendingChildPrompt]);
+    },
+    [active, docId, pendingChildPrompt],
+  );
 
   const deleteSession = useCallback(
     async (id: string) => {
@@ -191,7 +211,7 @@ export default function FeynmanView({ docId }: Props) {
               <label className="block text-[10.5px] font-semibold uppercase tracking-wider text-[var(--ink-500)]">
                 New session
               </label>
-              <p className="truncate text-[10.5px] text-[var(--ink-400)]">Feynman method</p>
+              <p className="truncate text-[10.5px] text-[var(--ink-400)]">Voice Feynman</p>
             </div>
           </div>
           <input
@@ -228,7 +248,7 @@ export default function FeynmanView({ docId }: Props) {
         <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2">
           {sessions.length === 0 ? (
             <p className="px-2 py-3 text-[11.5px] leading-relaxed text-[var(--ink-400)]">
-              No sessions yet. Pick a topic above and start with a plain-language explanation.
+              No sessions yet. Pick a topic above and explain it out loud.
             </p>
           ) : (
             sessions.map((s) => (
@@ -240,7 +260,6 @@ export default function FeynmanView({ docId }: Props) {
                 onSelect={() => {
                   setActiveId(s.id);
                   setPendingChildPrompt(s.endedAt ? null : pendingBySession[s.id] ?? null);
-                  setDraft("");
                 }}
                 onDelete={() => deleteSession(s.id)}
               />
@@ -253,16 +272,14 @@ export default function FeynmanView({ docId }: Props) {
         {!active ? (
           <EmptyHint
             icon={<Lightbulb className="h-7 w-7 text-[var(--ink-400)]" />}
-            text="Choose a topic, then refine your explanation through short guided questions."
+            text="Pick a topic, then teach it back out loud. The orb listens; the agent asks short questions."
           />
         ) : (
           <ActiveSession
             session={active}
             pendingChildPrompt={pendingChildPrompt}
-            draft={draft}
-            setDraft={setDraft}
             busy={busy}
-            onSend={explain}
+            onSubmit={submitExplanation}
             maxTurns={maxTurns}
           />
         )}
@@ -342,18 +359,14 @@ function SessionListItem({
 function ActiveSession({
   session,
   pendingChildPrompt,
-  draft,
-  setDraft,
   busy,
-  onSend,
+  onSubmit,
   maxTurns,
 }: {
   session: FeynmanSession;
   pendingChildPrompt: string | null;
-  draft: string;
-  setDraft: (s: string) => void;
   busy: boolean;
-  onSend: () => void;
+  onSubmit: (text: string) => void;
   maxTurns: number;
 }) {
   const ended = session.endedAt != null;
@@ -383,145 +396,330 @@ function ActiveSession({
         </div>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
-        <div className="mx-auto flex max-w-2xl flex-col gap-4">
-          {session.turns.length === 0 && pendingChildPrompt && !ended && (
-            <QuestionCard label="Question 1" text={pendingChildPrompt} />
-          )}
-
-          {session.turns.map((t, i) => (
-            <TimelineTurn
-              key={`${t.ts}-${i}`}
-              index={i}
-              childPrompt={t.childPrompt}
-              userExplanation={t.userExplanation}
-            />
-          ))}
-
-          {pendingChildPrompt && !ended && session.turns.length > 0 && (
-            <QuestionCard label={`Question ${session.turns.length + 1}`} text={pendingChildPrompt} />
-          )}
-
-          {!pendingChildPrompt && !ended && session.turns.length === 0 && busy && (
-            <LoadingPrompt text="Preparing the first question..." />
-          )}
-
-          {!pendingChildPrompt && !ended && session.turns.length > 0 && busy && (
-            <LoadingPrompt text="Preparing the next step..." />
-          )}
-
-          {!pendingChildPrompt && !ended && !busy && (
-            <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--surface-canvas)] px-4 py-3 text-[12.5px] leading-relaxed text-[var(--ink-500)]">
-              This session is paused. Start a new one to continue with a fresh question.
-            </div>
-          )}
-
-          {ended && (
+      {ended ? (
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+          <div className="mx-auto flex max-w-2xl flex-col gap-4">
             <FeedbackCard summary={session.summary} parts={feedbackParts} />
-          )}
+          </div>
         </div>
-      </div>
-
-      {!ended && pendingChildPrompt && (
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            onSend();
-          }}
-          className="shrink-0 border-t border-[var(--border-subtle)] bg-white p-3"
-        >
-          <div className="mb-1.5 flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-[var(--ink-500)]">
-            <PencilLine className="h-3.5 w-3.5" />
-            Your explanation
-          </div>
-          <div className="flex items-end gap-2">
-            <textarea
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                  e.preventDefault();
-                  onSend();
-                }
-              }}
-              placeholder="Explain it plainly..."
-              rows={3}
-              className="min-h-[70px] flex-1 resize-none rounded-md border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-3 py-2 text-[13px] leading-relaxed text-[var(--ink-900)] placeholder:text-[var(--ink-400)] focus:border-[var(--accent-500)] focus:outline-none"
-              disabled={busy}
-            />
-            <button
-              type="submit"
-              disabled={busy || !draft.trim()}
-              className="flex h-[70px] w-[44px] items-center justify-center rounded-md bg-[var(--ink-900)] text-white hover:bg-black disabled:opacity-40"
-              title="Send"
-            >
-              {busy ? (
-                <RefreshCw className="h-4 w-4 animate-spin" />
-              ) : (
-                <Send className="h-4 w-4" />
-              )}
-            </button>
-          </div>
-        </form>
+      ) : (
+        <VoiceConsole
+          prompt={pendingChildPrompt}
+          busy={busy}
+          turnIndex={session.turns.length}
+          onSubmit={onSubmit}
+        />
       )}
     </div>
   );
 }
 
-function TimelineTurn({
-  index,
-  childPrompt,
-  userExplanation,
+type RecognitionLike = {
+  start: () => void;
+  stop: () => void;
+  abort: () => void;
+  lang: string;
+  continuous: boolean;
+  interimResults: boolean;
+  onresult: ((e: SpeechResultEvent) => void) | null;
+  onend: ((e: Event) => void) | null;
+  onerror: ((e: Event) => void) | null;
+};
+type SpeechResultEvent = {
+  resultIndex: number;
+  results: ArrayLike<{
+    isFinal: boolean;
+    0: { transcript: string };
+  }>;
+};
+
+function getSpeechRecognition(): (new () => RecognitionLike) | null {
+  if (typeof window === "undefined") return null;
+  const w = window as unknown as {
+    SpeechRecognition?: new () => RecognitionLike;
+    webkitSpeechRecognition?: new () => RecognitionLike;
+  };
+  return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
+}
+
+function VoiceConsole({
+  prompt,
+  busy,
+  turnIndex,
+  onSubmit,
 }: {
-  index: number;
-  childPrompt: string;
-  userExplanation: string;
+  prompt: string | null;
+  busy: boolean;
+  turnIndex: number;
+  onSubmit: (text: string) => void;
 }) {
+  const [listening, setListening] = useState(false);
+  const [speaking, setSpeaking] = useState(false);
+  const [level, setLevel] = useState(0);
+  const [finalText, setFinalText] = useState("");
+  const [interimText, setInterimText] = useState("");
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const [hasMicSupport] = useState(() => typeof navigator !== "undefined" && !!getSpeechRecognition());
+
+  const recRef = useRef<RecognitionLike | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const rafRef = useRef<number>(0);
+  const finalRef = useRef<string>("");
+  const spokenForPromptRef = useRef<string | null>(null);
+
+  const stopMic = useCallback(() => {
+    try {
+      recRef.current?.stop();
+    } catch {
+      // already stopped
+    }
+    recRef.current = null;
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+    if (audioCtxRef.current && audioCtxRef.current.state !== "closed") {
+      audioCtxRef.current.close().catch(() => {});
+    }
+    audioCtxRef.current = null;
+    analyserRef.current = null;
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = 0;
+    }
+    setLevel(0);
+    setListening(false);
+  }, []);
+
+  const startMic = useCallback(async () => {
+    setVoiceError(null);
+    const SR = getSpeechRecognition();
+    if (!SR) {
+      setVoiceError("Voice input is not supported by this browser. Try Chrome, Edge or Safari.");
+      return;
+    }
+    try {
+      window.speechSynthesis?.cancel();
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      const AC =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const ctx = new AC();
+      audioCtxRef.current = ctx;
+      const src = ctx.createMediaStreamSource(stream);
+      const an = ctx.createAnalyser();
+      an.fftSize = 512;
+      src.connect(an);
+      analyserRef.current = an;
+
+      const data = new Uint8Array(an.fftSize);
+      const tick = () => {
+        const a = analyserRef.current;
+        if (!a) return;
+        a.getByteTimeDomainData(data);
+        let sum = 0;
+        for (let i = 0; i < data.length; i++) {
+          const v = (data[i] - 128) / 128;
+          sum += v * v;
+        }
+        const rms = Math.sqrt(sum / data.length);
+        setLevel(Math.min(1, rms * 3.2));
+        rafRef.current = requestAnimationFrame(tick);
+      };
+      tick();
+
+      const rec = new SR();
+      rec.continuous = true;
+      rec.interimResults = true;
+      rec.lang = navigator.language || "en-US";
+      finalRef.current = "";
+      setFinalText("");
+      setInterimText("");
+      rec.onresult = (e) => {
+        let interim = "";
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          const res = e.results[i];
+          const txt = res[0].transcript;
+          if (res.isFinal) finalRef.current += txt + " ";
+          else interim += txt;
+        }
+        setFinalText(finalRef.current);
+        setInterimText(interim);
+      };
+      rec.onerror = () => {
+        stopMic();
+      };
+      rec.onend = () => {
+        if (rafRef.current) {
+          cancelAnimationFrame(rafRef.current);
+          rafRef.current = 0;
+        }
+        setListening(false);
+      };
+      rec.start();
+      recRef.current = rec;
+      setListening(true);
+    } catch (e) {
+      stopMic();
+      setVoiceError(
+        e instanceof Error
+          ? e.message.includes("Permission")
+            ? "Microphone access denied."
+            : e.message
+          : "Could not start microphone.",
+      );
+    }
+  }, [stopMic]);
+
+  const handleStopAndSend = useCallback(() => {
+    try {
+      recRef.current?.stop();
+    } catch {
+      // already stopped
+    }
+    setTimeout(() => {
+      const merged = (finalRef.current + " " + interimText).trim();
+      stopMic();
+      if (merged) onSubmit(merged);
+    }, 250);
+  }, [interimText, onSubmit, stopMic]);
+
+  const speakPrompt = useCallback(
+    async (text: string) => {
+      if (typeof window === "undefined" || !window.speechSynthesis) return;
+      const synth = window.speechSynthesis;
+      try {
+        const ensureVoices = () =>
+          new Promise<void>((resolve) => {
+            if (synth.getVoices().length > 0) {
+              resolve();
+              return;
+            }
+            const handler = () => {
+              synth.removeEventListener("voiceschanged", handler);
+              resolve();
+            };
+            synth.addEventListener("voiceschanged", handler);
+            setTimeout(resolve, 1200);
+          });
+        await ensureVoices();
+        synth.cancel();
+        const lang = navigator.language || "en-US";
+        const voices = synth.getVoices();
+        const voice =
+          voices.find((v) => v.lang.toLowerCase() === lang.toLowerCase()) ??
+          voices.find((v) => v.lang.toLowerCase().startsWith(lang.split("-")[0].toLowerCase())) ??
+          null;
+        const u = new SpeechSynthesisUtterance(text);
+        u.lang = lang;
+        if (voice) u.voice = voice;
+        u.rate = 1;
+        u.pitch = 1.05;
+        u.onstart = () => setSpeaking(true);
+        u.onend = () => setSpeaking(false);
+        u.onerror = () => setSpeaking(false);
+        synth.speak(u);
+      } catch {
+        setSpeaking(false);
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (!prompt) return;
+    if (spokenForPromptRef.current === prompt) return;
+    spokenForPromptRef.current = prompt;
+    finalRef.current = "";
+    setFinalText("");
+    setInterimText("");
+    speakPrompt(prompt);
+  }, [prompt, speakPrompt]);
+
+  useEffect(() => {
+    return () => {
+      stopMic();
+      if (typeof window !== "undefined") window.speechSynthesis?.cancel();
+    };
+  }, [stopMic]);
+
+  const blobState: BlobState = busy
+    ? "thinking"
+    : listening
+      ? "listening"
+      : speaking
+        ? "speaking"
+        : "idle";
+
+  const stateLabel = busy
+    ? "Thinking..."
+    : speaking
+      ? "Reading the question..."
+      : listening
+        ? "Listening — speak naturally"
+        : prompt
+          ? `Tap the sphere to answer question ${turnIndex + 1}`
+          : "Preparing the next question...";
+
+  const hasTranscript = finalText.trim().length > 0 || interimText.trim().length > 0;
+
   return (
-    <div className="grid grid-cols-[28px_1fr] gap-3">
-      <div className="flex flex-col items-center">
-        <div className="flex h-7 w-7 items-center justify-center rounded-full border border-[var(--accent-100)] bg-[var(--accent-50)] text-[11px] font-semibold tabular-nums text-[var(--accent-700)]">
-          {index + 1}
-        </div>
-        <div className="mt-1 min-h-8 flex-1 border-l border-[var(--border-subtle)]" />
+    <div className="flex min-h-0 flex-1 flex-col bg-gradient-to-b from-white via-[#fafaff] to-[#f4f3fb] px-5 pt-4 pb-6">
+      <div className="mx-auto flex w-full max-w-2xl flex-col items-center">
+        {prompt && (
+          <div className="flex w-full items-start gap-2 rounded-lg border border-[var(--accent-100)] bg-[var(--accent-50)] px-3 py-2.5 text-[13px] leading-relaxed text-[var(--ink-900)]">
+            <button
+              type="button"
+              onClick={() => speakPrompt(prompt)}
+              disabled={speaking}
+              className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[var(--accent-700)] transition-colors hover:bg-white disabled:opacity-60"
+              title={speaking ? "Reading..." : "Play question"}
+              aria-label="Play question"
+            >
+              <Volume2 className="h-3.5 w-3.5" />
+            </button>
+            <p className="whitespace-pre-wrap pt-0.5">{prompt}</p>
+          </div>
+        )}
       </div>
-      <div className="min-w-0 space-y-2 pb-2">
-        <MiniPrompt text={childPrompt} />
-        <div className="rounded-lg bg-[var(--ink-900)] px-3 py-2 text-[13px] leading-relaxed text-white">
-          <p className="mb-1 text-[10.5px] font-semibold uppercase tracking-wider text-white/55">
-            Explanation
+
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 py-2">
+        <button
+          type="button"
+          onClick={() => {
+            if (busy || !prompt || !hasMicSupport) return;
+            if (listening) handleStopAndSend();
+            else startMic();
+          }}
+          disabled={busy || !prompt || !hasMicSupport}
+          className="rounded-full transition-transform hover:scale-[1.02] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+          title={listening ? "Tap to stop and send" : "Tap to speak"}
+        >
+          <VoiceBlob state={blobState} level={level} size={260} />
+        </button>
+
+        <p className="text-center text-[12.5px] font-medium tracking-tight text-[var(--ink-700)]">
+          {stateLabel}
+        </p>
+      </div>
+
+      <div className="mx-auto flex w-full max-w-2xl flex-col items-center gap-2">
+        {hasTranscript && (
+          <div className="w-full rounded-md border border-[var(--border-subtle)] bg-white px-3 py-2 text-[13px] leading-relaxed text-[var(--ink-900)]">
+            <span>{finalText}</span>
+            <span className="text-[var(--ink-400)]">{interimText}</span>
+          </div>
+        )}
+        {voiceError && (
+          <p className="text-[11.5px] leading-relaxed text-rose-700">{voiceError}</p>
+        )}
+        {!hasMicSupport && (
+          <p className="text-[11.5px] leading-relaxed text-rose-700">
+            Voice input is not supported by this browser. Try Chrome, Edge or Safari.
           </p>
-          <p className="whitespace-pre-wrap">{userExplanation}</p>
-        </div>
+        )}
       </div>
-    </div>
-  );
-}
-
-function QuestionCard({ label, text }: { label: string; text: string }) {
-  return (
-    <div className="rounded-lg border border-[var(--accent-100)] bg-[var(--accent-50)] px-4 py-3">
-      <div className="mb-1.5 flex items-center gap-1.5 text-[var(--accent-700)]">
-        <MessageCircleQuestionMark className="h-3.5 w-3.5" />
-        <p className="text-[11px] font-semibold uppercase tracking-wider">{label}</p>
-      </div>
-      <p className="whitespace-pre-wrap text-[13.5px] leading-relaxed text-[var(--ink-900)]">
-        {text}
-      </p>
-    </div>
-  );
-}
-
-function MiniPrompt({ text }: { text: string }) {
-  return (
-    <div className="rounded-lg border border-[var(--border-subtle)] bg-white px-3 py-2">
-      <div className="mb-1 flex items-center gap-1.5 text-[var(--ink-500)]">
-        <MessageCircleQuestionMark className="h-3.5 w-3.5" />
-        <p className="text-[10.5px] font-semibold uppercase tracking-wider">Question</p>
-      </div>
-      <p className="whitespace-pre-wrap text-[12.5px] leading-relaxed text-[var(--ink-700)]">
-        {text}
-      </p>
     </div>
   );
 }
@@ -558,19 +756,6 @@ function FeedbackCard({
           {summary || "No written feedback was returned for this session."}
         </p>
       )}
-    </div>
-  );
-}
-
-function LoadingPrompt({ text }: { text: string }) {
-  return (
-    <div className="flex flex-col items-center gap-3 py-8 text-center text-[var(--ink-500)]">
-      <div className="flex gap-1">
-        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--ink-400)] [animation-delay:0ms]" />
-        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--ink-400)] [animation-delay:150ms]" />
-        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--ink-400)] [animation-delay:300ms]" />
-      </div>
-      <p className="text-[12px]">{text}</p>
     </div>
   );
 }
