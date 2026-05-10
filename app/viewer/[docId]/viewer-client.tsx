@@ -10,7 +10,6 @@ import {
   MousePointerClick,
   BookOpen,
   Settings2,
-  RotateCcw,
 } from "lucide-react";
 
 import PdfViewer, { type Tag } from "@/components/PdfViewer";
@@ -576,26 +575,6 @@ export default function ViewerClient({ docId }: { docId: string }) {
           <span>Library</span>
         </div>
         <div className="ml-auto flex items-center gap-2 pr-1">
-          <ProgressChip
-            label="pages"
-            value={doneCount}
-            total={totalPages}
-            spinning={detecting}
-          />
-          <ProgressChip
-            label={AUTO_GENERATE_VIZ ? "viz ready" : "clicked"}
-            value={tagReadyCount}
-            total={AUTO_GENERATE_VIZ ? tags.length : tagReadyCount + tagGeneratingCount}
-            spinning={tagGeneratingCount > 0}
-          />
-          <button
-            type="button"
-            onClick={handleResetCache}
-            title="Forget cached state for this document and re-detect from scratch"
-            className="tab-icon-btn"
-          >
-            <RotateCcw className="h-3.5 w-3.5" />
-          </button>
           <div className="tab-icon-btn">
             <Settings2 className="h-3.5 w-3.5" />
           </div>
@@ -642,6 +621,18 @@ export default function ViewerClient({ docId }: { docId: string }) {
                     ? "Click any colored tag in the document to render its concept here."
                     : "Click any tag to generate its visualization. (manual mode is on — see .env)",
               activeTagError: activeTag?.error ?? null,
+              progress: {
+                pagesDone: doneCount,
+                pagesTotal: totalPages,
+                pagesSpinning: detecting,
+                vizLabel: AUTO_GENERATE_VIZ ? "viz ready" : "clicked",
+                vizValue: tagReadyCount,
+                vizTotal: AUTO_GENERATE_VIZ
+                  ? tags.length
+                  : tagReadyCount + tagGeneratingCount,
+                vizSpinning: tagGeneratingCount > 0,
+                onResetCache: handleResetCache,
+              },
             }}
           />
         </div>
@@ -650,25 +641,3 @@ export default function ViewerClient({ docId }: { docId: string }) {
   );
 }
 
-function ProgressChip({
-  label,
-  value,
-  total,
-  spinning,
-}: {
-  label: string;
-  value: number;
-  total: number;
-  spinning?: boolean;
-}) {
-  return (
-    <div className="flex items-center gap-1.5 rounded-md border border-[var(--border-subtle)] bg-white px-2 py-1 text-[11px]">
-      {spinning && <RefreshCw className="h-3 w-3 animate-spin text-[var(--accent-600)]" />}
-      <span className="tabular-nums font-medium text-[var(--ink-900)]">
-        {value}
-        <span className="font-normal text-[var(--ink-400)]">/{total}</span>
-      </span>
-      <span className="text-[var(--ink-500)]">{label}</span>
-    </div>
-  );
-}

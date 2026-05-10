@@ -29,6 +29,8 @@ import {
   Baby,
   ChevronDown,
   MoreHorizontal,
+  RefreshCw,
+  RotateCcw,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -112,13 +114,28 @@ type Props = {
     loadingDetail?: string;
     onRuntimeError?: (msg: string) => void;
     activeTagError?: string | null;
+    progress: {
+      pagesDone: number;
+      pagesTotal: number;
+      pagesSpinning: boolean;
+      vizLabel: string;
+      vizValue: number;
+      vizTotal: number;
+      vizSpinning: boolean;
+      onResetCache: () => void;
+    };
   };
 };
 
 export default function RightPane({ docId, mode, onModeChange, visualizer }: Props) {
   return (
     <div className="flex h-full flex-col bg-white">
-      <Header mode={mode} onModeChange={onModeChange} visualizerSpec={visualizer.spec} />
+      <Header
+        mode={mode}
+        onModeChange={onModeChange}
+        visualizerSpec={visualizer.spec}
+        visualizerProgress={visualizer.progress}
+      />
 
       <div className="relative min-h-0 flex-1 bg-white">
         {mode === "visualizer" && (
@@ -174,10 +191,21 @@ function Header({
   mode,
   onModeChange,
   visualizerSpec,
+  visualizerProgress,
 }: {
   mode: RightPaneMode;
   onModeChange: (m: RightPaneMode) => void;
   visualizerSpec: VizSpec | null;
+  visualizerProgress: {
+    pagesDone: number;
+    pagesTotal: number;
+    pagesSpinning: boolean;
+    vizLabel: string;
+    vizValue: number;
+    vizTotal: number;
+    vizSpinning: boolean;
+    onResetCache: () => void;
+  };
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -216,7 +244,7 @@ function Header({
           <button
             type="button"
             onClick={() => setOpen((v) => !v)}
-            className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[12px] font-medium transition-colors ${
+            className={`inline-flex cursor-pointer items-center gap-1.5 rounded-md border px-2 py-1 text-[12px] font-medium transition-colors ${
               open
                 ? "border-[var(--accent-100)] bg-[var(--accent-50)] text-[var(--accent-700)]"
                 : "border-[var(--border-subtle)] bg-white text-[var(--ink-900)] hover:bg-[var(--surface-sunken)]"
@@ -247,7 +275,7 @@ function Header({
                         onModeChange(m.id);
                         setOpen(false);
                       }}
-                      className={`flex w-full items-start gap-2.5 px-3 py-2 text-left transition-colors ${
+                      className={`flex w-full cursor-pointer items-start gap-2.5 px-3 py-2 text-left transition-colors ${
                         active
                           ? "bg-[var(--accent-50)]"
                           : "hover:bg-[var(--surface-sunken)]"
@@ -290,10 +318,58 @@ function Header({
         )}
         <p className="truncate text-[13.5px] font-medium text-[var(--ink-900)]">{subtitle}</p>
       </div>
-      <button type="button" className="tab-icon-btn">
-        <MoreHorizontal className="h-4 w-4" />
-      </button>
+      {mode === "visualizer" ? (
+        <div className="flex shrink-0 items-center gap-2">
+          <ProgressChip
+            label="pages"
+            value={visualizerProgress.pagesDone}
+            total={visualizerProgress.pagesTotal}
+            spinning={visualizerProgress.pagesSpinning}
+          />
+          <ProgressChip
+            label={visualizerProgress.vizLabel}
+            value={visualizerProgress.vizValue}
+            total={visualizerProgress.vizTotal}
+            spinning={visualizerProgress.vizSpinning}
+          />
+          <button
+            type="button"
+            onClick={visualizerProgress.onResetCache}
+            title="Forget cached state for this document and re-detect from scratch"
+            className="tab-icon-btn"
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      ) : (
+        <button type="button" className="tab-icon-btn">
+          <MoreHorizontal className="h-4 w-4" />
+        </button>
+      )}
     </header>
+  );
+}
+
+function ProgressChip({
+  label,
+  value,
+  total,
+  spinning,
+}: {
+  label: string;
+  value: number;
+  total: number;
+  spinning?: boolean;
+}) {
+  return (
+    <div className="flex items-center gap-1.5 rounded-md border border-[var(--border-subtle)] bg-white px-2 py-1 text-[11px]">
+      {spinning && <RefreshCw className="h-3 w-3 animate-spin text-[var(--accent-600)]" />}
+      <span className="tabular-nums font-medium text-[var(--ink-900)]">
+        {value}
+        <span className="font-normal text-[var(--ink-400)]">/{total}</span>
+      </span>
+      <span className="text-[var(--ink-500)]">{label}</span>
+    </div>
   );
 }
 
