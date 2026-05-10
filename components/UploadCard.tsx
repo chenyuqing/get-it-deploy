@@ -8,6 +8,7 @@ import {
   ArrowRight,
   Box,
   Activity,
+  FileText,
   Sigma,
   BarChart3,
 } from "lucide-react";
@@ -20,7 +21,7 @@ const SAMPLE_EMOJI: Record<string, string> = {
   chemistry: "🧪",
 };
 
-type FeatureColor = "rose" | "amber" | "violet" | "sky";
+type FeatureColor = "rose" | "amber" | "emerald" | "violet" | "sky";
 type FeatureIcon = React.ComponentType<{
   className?: string;
   style?: React.CSSProperties;
@@ -35,6 +36,7 @@ const FEATURES: Array<{
   { color: "amber",  icon: Activity,  title: "Simulations", desc: "Watch concepts come alive" },
   { color: "violet", icon: Sigma,     title: "Formulas",    desc: "Math rendered, not just typed" },
   { color: "sky",    icon: BarChart3, title: "Graphs",      desc: "Data made visual" },
+  { color: "emerald", icon: FileText,  title: "Source",      desc: "Reference text pulled into focus" },
 ];
 
 type Sample = {
@@ -110,7 +112,7 @@ export default function UploadCard() {
 
       <p className="mt-7 max-w-2xl text-[15px] leading-[1.65] text-[var(--ink-700)]">
         Upload any PDF. Our agent finds what&apos;s worth visualizing and
-        renders it inline — 3D, simulations, formulas, graphs.
+        renders it inline — 3D, simulations, formulas, graphs, sources.
       </p>
 
       {/* Drop zone — output-type badges + CTA button */}
