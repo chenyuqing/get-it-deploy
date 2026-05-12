@@ -1,9 +1,23 @@
 import type { NextConfig } from "next";
 import path from "node:path";
+import { createRequire } from "node:module";
+
+// Bake the current package.json version into the client bundle as
+// NEXT_PUBLIC_APP_VERSION. In CI the release workflow updates
+// package.json from the pushed git tag *before* `next build` runs,
+// so this env value is the same one electron-builder uses for the
+// app's CFBundleShortVersionString / exe properties — single source
+// of truth for the whole release pipeline.
+const pkg = createRequire(import.meta.url)("./package.json") as {
+  version: string;
+};
 
 const nextConfig: NextConfig = {
   turbopack: {
     root: path.resolve(__dirname),
+  },
+  env: {
+    NEXT_PUBLIC_APP_VERSION: pkg.version,
   },
   // Self-contained server output. `next build` writes a runnable
   // .next/standalone/server.js with a trimmed node_modules tree — exactly

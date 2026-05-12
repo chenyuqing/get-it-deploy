@@ -64,6 +64,7 @@ const {
   refreshCodexStatus,
   onCodexStatusChange,
 } = require("./setup");
+const { maybeRunUpdate } = require("./updater");
 
 // ── Single-instance lock ────────────────────────────────────────────────
 // If the user double-clicks the app icon a second time, focus the existing
@@ -358,8 +359,18 @@ function focusMainWindow() {
 
 app.whenReady().then(async () => {
   try {
-    // Run the wizard FIRST. We can't start the Next server without codex
-    // — the agents would crash on the first request.
+    // Update check runs BEFORE anything else — the wizard, the embedded
+    // server, the main window. If the user accepts the update, we quit
+    // here (the new installer takes over). Otherwise we proceed with
+    // the normal boot sequence.
+    const userKickedOffUpdate = await maybeRunUpdate();
+    if (userKickedOffUpdate) {
+      // updater.js calls app.quit() on its own; just bail out.
+      return;
+    }
+
+    // Run the codex wizard. We can't start the Next server without
+    // codex — the agents would crash on the first request.
     const ok = await ensureCodexReady();
     if (!ok) {
       app.quit();

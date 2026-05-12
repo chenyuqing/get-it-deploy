@@ -2,6 +2,8 @@ import Link from "next/link";
 import UploadCard from "@/components/UploadCard";
 import AccountButton from "@/components/AccountButton";
 import SettingsButton from "@/components/SettingsButton";
+import WelcomePopup from "@/components/WelcomePopup";
+import { APP_VERSION } from "@/lib/version";
 import {
   Upload,
   BookOpen,
@@ -75,7 +77,15 @@ export default function Home() {
         <div className="relative">
           <UploadCard />
         </div>
+        {/* Small non-invasive version tag, bottom-right of the page */}
+        <div
+          className="pointer-events-none absolute bottom-3 right-4 text-[10.5px] font-medium tabular-nums text-[var(--ink-300)]"
+          aria-label={`Get It. version ${APP_VERSION}`}
+        >
+          v{APP_VERSION}
+        </div>
       </div>
+      <WelcomePopup />
     </main>
   );
 }

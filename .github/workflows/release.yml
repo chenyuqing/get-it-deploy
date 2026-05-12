@@ -56,6 +56,24 @@ jobs:
           node-version: "20"
           cache: npm
 
+      - name: Pin app version from tag
+        shell: bash
+        # Strip the leading "v" off the tag and write it into package.json
+        # so electron-builder, the standalone server, Next.js (via
+        # NEXT_PUBLIC_APP_VERSION), and the in-app version chip all read
+        # the same single value. Manual workflow_dispatch supports an
+        # explicit input; tag-pushes derive from GITHUB_REF.
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${GITHUB_REF#refs/tags/}"
+          fi
+          VERSION="${TAG#v}"
+          echo "Pinning to version $VERSION"
+          npm version --no-git-tag-version --allow-same-version "$VERSION"
+          echo "APP_VERSION=$VERSION" >> "$GITHUB_ENV"
+
       - name: Install dependencies
         run: npm ci
 

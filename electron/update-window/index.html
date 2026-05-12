@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline' 'self'; script-src 'self';" />
+    <title>Get It. — Update available</title>
+    <style>
+      :root {
+        --ink-900: #111113;
+        --ink-700: #2c2c33;
+        --ink-500: #5a5a66;
+        --ink-400: #8a8a96;
+        --border-subtle: #e6e6ea;
+        --border-strong: #d2d2da;
+        --accent-50: #eef4ff;
+        --accent-100: #d8e4ff;
+        --accent-500: #4a6cf7;
+        --accent-600: #3b5be0;
+        --accent-700: #2f49b7;
+        --surface-raised: #ffffff;
+        --surface-canvas: #fafafb;
+      }
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0; padding: 0; height: 100%;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+        background: var(--surface-canvas);
+        color: var(--ink-900);
+        font-size: 14px;
+      }
+      body { display: flex; flex-direction: column; }
+      header { padding: 28px 32px 8px; }
+      header h1 {
+        font-size: 22px; font-weight: 700; margin: 0 0 6px; letter-spacing: -0.01em;
+      }
+      header p { color: var(--ink-500); margin: 0; font-size: 13px; line-height: 1.55; }
+      main { flex: 1; padding: 14px 32px; overflow: auto; }
+      .versions {
+        display: flex; align-items: baseline; gap: 8px; margin-bottom: 14px;
+      }
+      .versions .latest {
+        font-size: 28px; font-weight: 900; letter-spacing: -0.01em;
+      }
+      .versions .current {
+        color: var(--ink-400); font-size: 13px;
+      }
+      .notes {
+        border: 1px solid var(--border-subtle);
+        background: white;
+        border-radius: 8px;
+        padding: 12px 14px;
+        font-size: 12.5px;
+        line-height: 1.55;
+        color: var(--ink-700);
+        max-height: 200px;
+        overflow: auto;
+        white-space: pre-wrap;
+      }
+      .notes em { color: var(--ink-400); font-style: normal; }
+      .progress-shell {
+        margin-top: 14px;
+        display: none;
+      }
+      .progress-shell.active { display: block; }
+      .progress-bar {
+        height: 6px;
+        background: var(--surface-canvas);
+        border: 1px solid var(--border-subtle);
+        border-radius: 999px;
+        overflow: hidden;
+      }
+      .progress-bar > div {
+        height: 100%; width: 0%; background: var(--accent-600); transition: width 0.18s ease;
+      }
+      .progress-label {
+        margin-top: 6px; font-size: 11.5px; color: var(--ink-500);
+        display: flex; justify-content: space-between;
+      }
+      footer {
+        padding: 14px 24px 20px;
+        border-top: 1px solid var(--border-subtle);
+        display: flex; justify-content: space-between; align-items: center;
+        background: white;
+      }
+      .btn {
+        appearance: none; border: 0; font: inherit;
+        padding: 7px 14px; border-radius: 7px;
+        background: var(--accent-600); color: white;
+        font-weight: 600; font-size: 12.5px;
+        cursor: pointer; transition: background 0.12s ease;
+      }
+      .btn:hover:not(:disabled) { background: var(--accent-700); }
+      .btn.secondary {
+        background: white; color: var(--ink-900);
+        border: 1px solid var(--border-strong);
+      }
+      .btn.secondary:hover:not(:disabled) { background: var(--surface-canvas); }
+      .btn:disabled { opacity: 0.55; cursor: not-allowed; }
+      .err {
+        color: #be123c; font-size: 12px; margin-top: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>A new version of Get It. is available</h1>
+      <p id="subtitle">Updating keeps the new agents, fixes and integrations rolling. Your library and study data stay on this machine.</p>
+    </header>
+
+    <main>
+      <div class="versions">
+        <span class="latest" id="latest-version">…</span>
+        <span class="current">you're on <span id="current-version">…</span></span>
+      </div>
+
+      <p id="notes-heading" style="font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-500); margin: 0 0 6px;">
+        What's new
+      </p>
+      <div class="notes" id="release-notes"><em>Loading release notes…</em></div>
+
+      <div class="progress-shell" id="progress-shell">
+        <div class="progress-bar"><div id="progress-fill"></div></div>
+        <div class="progress-label">
+          <span id="progress-status">Downloading…</span>
+          <span id="progress-pct">0%</span>
+        </div>
+      </div>
+
+      <p class="err" id="error" style="display:none;"></p>
+    </main>
+
+    <footer>
+      <span style="font-size: 11px; color: var(--ink-400);">From github.com/beltromatti/get-it</span>
+      <div style="display: flex; gap: 8px;">
+        <button class="btn secondary" id="btn-later">Later</button>
+        <button class="btn" id="btn-update">Update now</button>
+      </div>
+    </footer>
+
+    <script src="renderer.js"></script>
+  </body>
+</html>
