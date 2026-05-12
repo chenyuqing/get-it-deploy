@@ -4,7 +4,8 @@
   "version": "1.0.0",
   "description": "Read it. See it. Get it. — the document-centred study companion.",
   "author": {
-    "name": "Get It contributors"
+    "name": "beltromatti",
+    "email": "beltromatti@gmail.com"
   },
   "homepage": "https://github.com/beltromatti/get-it",
   "private": true,
@@ -66,8 +67,9 @@
     "wait-on": "^8.0.1"
   },
   "build": {
-    "appId": "com.getit.app",
+    "appId": "com.beltromatti.getit",
     "productName": "Get It",
+    "copyright": "Copyright © 2026 beltromatti",
     "directories": {
       "buildResources": "electron/assets",
       "output": "dist-electron"
@@ -110,7 +112,8 @@
       }
     },
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "publisherName": "beltromatti"
     },
     "linux": {
       "target": "AppImage",
