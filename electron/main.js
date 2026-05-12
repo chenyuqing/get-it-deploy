@@ -51,10 +51,11 @@ if (typeof electronModule === "string") {
 }
 
 const { app, BrowserWindow, dialog, shell, ipcMain } = electronModule;
+
+const { spawn, spawnSync } = require("node:child_process");
 const path = require("node:path");
 const fs = require("node:fs");
 const net = require("node:net");
-const { spawn } = require("node:child_process");
 const http = require("node:http");
 const {
   ensureCodexReady,
@@ -201,6 +202,11 @@ async function startEmbeddedServer() {
     cwd: standalone,
     env: { ...env, ELECTRON_RUN_AS_NODE: "1" },
     stdio: ["ignore", "pipe", "pipe"],
+    // Own process group on POSIX so we can SIGTERM the whole subtree —
+    // including any `codex exec` children the SDK spawns mid-call.
+    // Without this, those grandchildren get orphaned to launchd when we
+    // shut down and pile up in the dock as "exec" tiles.
+    detached: process.platform !== "win32",
   });
 
   const logPath = path.join(DATA_DIR, "logs", "server.log");
@@ -215,14 +221,45 @@ async function startEmbeddedServer() {
   await waitForHttp(serverUrl, 45000);
 }
 
+/**
+ * Cross-platform kill of an entire process tree. On POSIX we send the
+ * signal to the negative pid (process group) — the server child was
+ * spawned `detached: true` so it owns its group, which includes any
+ * `codex exec` subprocesses the SDK launches. On Windows `taskkill /T`
+ * walks the tree explicitly.
+ */
+function killProcessTree(pid, signal = "SIGTERM") {
+  if (process.platform === "win32") {
+    try {
+      spawnSync("taskkill", ["/pid", String(pid), "/f", "/t"], {
+        stdio: "ignore",
+        windowsHide: true,
+      });
+    } catch {
+      /* ignore */
+    }
+    return;
+  }
+  try {
+    process.kill(-pid, signal);
+  } catch {
+    try {
+      process.kill(pid, signal);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
 function stopEmbeddedServer() {
   if (!serverChild || serverChild.killed) return;
-  try {
-    serverChild.kill();
-  } catch {
-    /* ignore */
-  }
+  const pid = serverChild.pid;
   serverChild = null;
+  if (typeof pid === "number") killProcessTree(pid, "SIGTERM");
+  // Belt-and-suspenders: 200 ms later, escalate to SIGKILL on the group.
+  setTimeout(() => {
+    if (typeof pid === "number") killProcessTree(pid, "SIGKILL");
+  }, 200).unref();
 }
 
 // ── Main window ─────────────────────────────────────────────────────────
@@ -361,3 +398,32 @@ app.on("before-quit", (event) => {
     app.exit(0);
   }, 350);
 });
+
+/**
+ * Native signals: when the user kills `electron .` from a terminal
+ * (Ctrl+C, `kill <pid>`, etc.), Electron doesn't always fire before-quit
+ * before terminating — and our server child + its codex subprocesses
+ * would be reparented to launchd and pile up. Catch the signals here,
+ * tree-kill the children, then exit.
+ */
+function signalShutdown(signal) {
+  if (quitting) return;
+  quitting = true;
+  try {
+    stopEmbeddedServer();
+  } catch {
+    /* ignore */
+  }
+  // Give the SIGTERM/SIGKILL escalation in stopEmbeddedServer a moment
+  // to land before we drop our own event loop.
+  setTimeout(() => {
+    try {
+      app.exit(signal === "SIGINT" ? 130 : 143);
+    } catch {
+      process.exit(signal === "SIGINT" ? 130 : 143);
+    }
+  }, 250).unref();
+}
+process.on("SIGINT", () => signalShutdown("SIGINT"));
+process.on("SIGTERM", () => signalShutdown("SIGTERM"));
+process.on("SIGHUP", () => signalShutdown("SIGHUP"));
