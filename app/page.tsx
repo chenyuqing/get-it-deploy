@@ -2,6 +2,7 @@ import Link from "next/link";
 import UploadCard from "@/components/UploadCard";
 import AccountButton from "@/components/AccountButton";
 import SettingsButton from "@/components/SettingsButton";
+import TooltipChip from "@/components/TooltipChip";
 import WelcomePopup from "@/components/WelcomePopup";
 import { APP_VERSION } from "@/lib/version";
 import {
@@ -43,10 +44,12 @@ export default function Home() {
           <Upload className="h-3.5 w-3.5 text-[var(--accent-600)]" />
           <span>Upload</span>
         </div>
-        <Link href="/library" className="tab-item">
-          <BookOpen className="h-3.5 w-3.5 text-[var(--ink-400)]" />
-          <span>Library</span>
-        </Link>
+        <TooltipChip tip="Your library of opened PDFs.">
+          <Link href="/library" aria-label="Open library" className="tab-item">
+            <BookOpen className="h-3.5 w-3.5 text-[var(--ink-400)]" />
+            <span>Library</span>
+          </Link>
+        </TooltipChip>
         <div className="ml-auto flex items-center gap-1 pr-1">
           <SettingsButton />
           <AccountButton />

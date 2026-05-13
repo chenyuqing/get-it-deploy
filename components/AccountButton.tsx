@@ -69,15 +69,21 @@ export default function AccountButton() {
 
   return (
     <div ref={ref} className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="tab-icon-btn"
-        title="Account"
-        aria-label="Account"
-      >
-        <CircleUserRound className="h-3.5 w-3.5" />
-      </button>
+      <span className="viz-tooltip-anchor relative inline-flex">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="tab-icon-btn"
+          aria-label="Account"
+        >
+          <CircleUserRound className="h-3.5 w-3.5" />
+        </button>
+        {!open && (
+          <span className="viz-tooltip" role="tooltip">
+            Your ChatGPT account, usage limits and sign-out.
+          </span>
+        )}
+      </span>
       <AnimatePresence>
         {open && (
           <motion.div

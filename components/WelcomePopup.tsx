@@ -27,10 +27,40 @@ type WelcomeState = {
   shouldShow: boolean;
 };
 
+// sessionStorage key that says "the user dismissed the welcome popup
+// during this session". Survives client-side navigations between
+// pages, gone when the Electron BrowserWindow is recreated at next
+// app launch. We keep both this in-session flag AND the durable
+// "Don't show again" file in user-data: dismiss this session is the
+// default behaviour of X / Let's go; "Don't show again" persists.
+const SESSION_DISMISS_KEY = "getit:welcome:dismissed-session";
+
+function dismissedThisSession(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.sessionStorage.getItem(SESSION_DISMISS_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function markDismissedThisSession(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(SESSION_DISMISS_KEY, "1");
+  } catch {
+    /* private-mode fallback: the popup just shows once per mount, fine */
+  }
+}
+
 export default function WelcomePopup() {
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
+    // Already dismissed in this session → don't even ping the server.
+    // This is what keeps the popup from re-appearing when the user
+    // navigates Library → Upload after closing it.
+    if (dismissedThisSession()) return;
     let cancelled = false;
     fetch("/api/welcome", { cache: "no-store" })
       .then((r) => r.json())
@@ -44,8 +74,12 @@ export default function WelcomePopup() {
     };
   }, []);
 
-  const close = useCallback(() => setOpen(false), []);
+  const close = useCallback(() => {
+    markDismissedThisSession();
+    setOpen(false);
+  }, []);
   const dismissForever = useCallback(async () => {
+    markDismissedThisSession();
     try {
       await fetch("/api/welcome", { method: "POST" });
     } catch {
@@ -84,9 +118,11 @@ export default function WelcomePopup() {
             <span className="font-black text-[var(--ink-900)]">Get It.</span>
           </h2>
           <p className="mt-2 text-[13px] leading-relaxed text-[var(--ink-700)]">
-            Built in 24 hours at <strong>GDG AI Hack 2026, Milan</strong> by
-            four students, then polished into a desktop app you can install
-            in one click.
+            Four students. 24h at{" "}
+            <strong>GDG AI Hack 2026, Milan</strong>. One conviction: getting
+            a concept fast is half the battle — the other half is knowing
+            you actually got it. We built Get It. to do both, then made it
+            free for every student who needs the same.
           </p>
         </div>
 
@@ -106,9 +142,10 @@ export default function WelcomePopup() {
 
         <div className="mx-6 my-4 rounded-xl border border-[var(--border-subtle)] bg-white px-4 py-3 text-[12px] leading-relaxed text-[var(--ink-700)]">
           <p>
-            Get It. is <strong>free and open source</strong> under the MIT
-            license. Fork it, ship a feature, send a PR — that's the whole
-            point of releasing it this way.
+            <strong>Free, forever — and yours to shape.</strong> Your study
+            data stays on this computer, no accounts, no telemetry. Got a
+            bug, a missing feature, or code you want to send our way? Tell
+            us — we&apos;re listening.
           </p>
           <div className="mt-3 flex flex-col gap-1.5">
             <a

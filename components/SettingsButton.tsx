@@ -45,15 +45,21 @@ export default function SettingsButton() {
 
   return (
     <div ref={ref} className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="tab-icon-btn"
-        title="Settings"
-        aria-label="Settings"
-      >
-        <Settings2 className="h-3.5 w-3.5" />
-      </button>
+      <span className="viz-tooltip-anchor relative inline-flex">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="tab-icon-btn"
+          aria-label="Settings"
+        >
+          <Settings2 className="h-3.5 w-3.5" />
+        </button>
+        {!open && (
+          <span className="viz-tooltip" role="tooltip">
+            Settings — visualization preferences for this app.
+          </span>
+        )}
+      </span>
       <AnimatePresence>
         {open && (
           <motion.div

@@ -14,6 +14,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import AccountButton from "@/components/AccountButton";
 import SettingsButton from "@/components/SettingsButton";
+import TooltipChip from "@/components/TooltipChip";
 import {
   ArrowLeft,
   BookOpen,
@@ -106,26 +107,32 @@ export default function LibraryClient() {
     <main className="flex min-h-screen flex-col bg-[var(--surface-canvas)] text-[var(--ink-900)]">
       {/* Top tab bar */}
       <div className="tab-bar tab-bar--fused">
-        <Link href="/" className="tab-icon-btn" title="Back to upload">
-          <ArrowLeft className="h-3.5 w-3.5" />
-        </Link>
-        <Link href="/" className="tab-item">
-          <Upload className="h-3.5 w-3.5 text-[var(--ink-400)]" />
-          <span>Upload</span>
-        </Link>
+        <TooltipChip tip="Back to upload">
+          <Link href="/" aria-label="Back to upload" className="tab-icon-btn">
+            <ArrowLeft className="h-3.5 w-3.5" />
+          </Link>
+        </TooltipChip>
+        <TooltipChip tip="Open or drop a new PDF.">
+          <Link href="/" aria-label="Go to upload" className="tab-item">
+            <Upload className="h-3.5 w-3.5 text-[var(--ink-400)]" />
+            <span>Upload</span>
+          </Link>
+        </TooltipChip>
         <div className="tab-item" data-active="true">
           <BookOpen className="h-3.5 w-3.5 text-[var(--accent-600)]" />
           <span>Library</span>
         </div>
         <div className="ml-auto flex items-center gap-1 pr-1">
-          <button
-            type="button"
-            onClick={reload}
-            title="Refresh"
-            className="tab-icon-btn"
-          >
-            <RefreshCw className="h-3.5 w-3.5" />
-          </button>
+          <TooltipChip tip="Refresh the library list.">
+            <button
+              type="button"
+              onClick={reload}
+              aria-label="Refresh library"
+              className="tab-icon-btn"
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+            </button>
+          </TooltipChip>
           <SettingsButton />
           <AccountButton />
         </div>

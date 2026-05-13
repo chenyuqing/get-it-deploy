@@ -22,6 +22,7 @@ import PdfViewer, { type Tag } from "@/components/PdfViewer";
 import RightPane, { type RightPaneMode } from "@/components/RightPane";
 import AccountButton from "@/components/AccountButton";
 import SettingsButton, { SETTINGS_EVENT } from "@/components/SettingsButton";
+import TooltipChip from "@/components/TooltipChip";
 import type { DetectedConcept, VizSpec, VizType } from "@/lib/schemas";
 import { AUTO_GENERATE_VIZ, MAX_VIZ_GEN_RETRIES } from "@/lib/config";
 
@@ -655,9 +656,11 @@ export default function ViewerClient({ docId }: { docId: string }) {
     <div className="flex h-screen flex-col bg-[var(--surface-canvas)]">
       {/* Top tab bar */}
       <div className="tab-bar shrink-0">
-        <Link href="/" className="tab-icon-btn" title="Back">
-          <ArrowLeft className="h-3.5 w-3.5" />
-        </Link>
+        <TooltipChip tip="Back to upload">
+          <Link href="/" aria-label="Back to upload" className="tab-icon-btn">
+            <ArrowLeft className="h-3.5 w-3.5" />
+          </Link>
+        </TooltipChip>
         <div className="tab-item" data-active="true">
           <FileText className="h-3.5 w-3.5 text-[var(--accent-600)]" />
           <span className="max-w-[180px] truncate">{truncated}</span>
@@ -675,10 +678,12 @@ export default function ViewerClient({ docId }: { docId: string }) {
             </span>
           )}
         </div>
-        <Link href="/library" className="tab-item">
-          <BookOpen className="h-3.5 w-3.5 text-[var(--ink-400)]" />
-          <span>Library</span>
-        </Link>
+        <TooltipChip tip="Your library of opened PDFs.">
+          <Link href="/library" aria-label="Open library" className="tab-item">
+            <BookOpen className="h-3.5 w-3.5 text-[var(--ink-400)]" />
+            <span>Library</span>
+          </Link>
+        </TooltipChip>
         <div className="ml-auto flex items-center gap-2 pr-1">
           <KGStatusBadge docId={docId} />
           <TagsChip
@@ -686,18 +691,19 @@ export default function ViewerClient({ docId }: { docId: string }) {
             pagesTotal={totalPages}
             detecting={detecting}
             tagsReady={tagReadyCount}
-            tagsTotal={autoGenerate ? tags.length : tagReadyCount + tagGeneratingCount}
-            tagsLabel={autoGenerate ? "viz ready" : "clicked"}
+            tagsTotal={tags.length}
             generating={tagGeneratingCount > 0}
           />
-          <button
-            type="button"
-            onClick={handleResetCache}
-            title="Forget cached state for this document and re-detect from scratch"
-            className="tab-icon-btn"
-          >
-            <RotateCcw className="h-3.5 w-3.5" />
-          </button>
+          <TooltipChip tip="Forget cached state for this document and re-detect from scratch.">
+            <button
+              type="button"
+              onClick={handleResetCache}
+              aria-label="Reset cached state for this document"
+              className="tab-icon-btn"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+            </button>
+          </TooltipChip>
           <SettingsButton />
           <AccountButton />
         </div>
@@ -755,13 +761,29 @@ export default function ViewerClient({ docId }: { docId: string }) {
  *  tag icon makes it obvious this is the document-tag pipeline; the two
  *  pairs are separated by a faint pipe so the eye can scan them as one
  *  surface. Spins whenever either side is in flight. */
+/**
+ * Visualization agent status pill.
+ *
+ * Two phases:
+ *   • Detection in progress — `pagesDone < pagesTotal`. We show the
+ *     page-scan progress (`N/total pages`). This is the concept-
+ *     detection agent walking the document; until it's done, there's
+ *     nothing meaningful to say about tags yet.
+ *   • Detection done — switch to `N/total viz ready`. The numerator
+ *     counts tags with a successfully-rendered visualization spec; the
+ *     denominator is every tag the agent found. Works identically in
+ *     auto-generate and manual mode — the only difference is how the
+ *     numerator climbs (parallel vs on click).
+ *
+ * The tooltip explains which agent the chip is reporting on, so the
+ * user can tell it apart from the knowledge-graph badge on its left.
+ */
 function TagsChip({
   pagesDone,
   pagesTotal,
   detecting,
   tagsReady,
   tagsTotal,
-  tagsLabel,
   generating,
 }: {
   pagesDone: number;
@@ -769,34 +791,43 @@ function TagsChip({
   detecting: boolean;
   tagsReady: number;
   tagsTotal: number;
-  tagsLabel: string;
   generating: boolean;
 }) {
-  const spinning = detecting || generating;
+  const detectionDone = pagesTotal > 0 && pagesDone >= pagesTotal;
+  const spinning = detectionDone ? generating : detecting;
+  const tip = detectionDone
+    ? "Visualization agent — concept detection done; each tag spins up a per-concept renderer (3D, animation, formula, graph, source)."
+    : "Visualization agent — scanning each page for the concepts worth tagging.";
   return (
-    <div
-      className="flex items-center gap-1.5 rounded-md border border-[var(--border-subtle)] bg-white px-2 py-1 text-[11px]"
-      title="Pages detected · concept tags generated"
-    >
-      {spinning ? (
-        <RefreshCw className="h-3 w-3 animate-spin text-[var(--accent-600)]" />
-      ) : (
-        <TagIcon className="h-3 w-3 text-[var(--ink-400)]" />
-      )}
-      <span className="tabular-nums font-medium text-[var(--ink-900)]">
-        {pagesDone}
-        <span className="font-normal text-[var(--ink-400)]">/{pagesTotal}</span>
+    <span className="viz-tooltip-anchor relative inline-flex">
+      <div className="flex items-center gap-1.5 rounded-md border border-[var(--border-subtle)] bg-white px-2 py-1 text-[11px]">
+        {spinning ? (
+          <RefreshCw className="h-3 w-3 animate-spin text-[var(--accent-600)]" />
+        ) : (
+          <TagIcon className="h-3 w-3 text-[var(--ink-400)]" />
+        )}
+        {!detectionDone ? (
+          <>
+            <span className="tabular-nums font-medium text-[var(--ink-900)]">
+              {pagesDone}
+              <span className="font-normal text-[var(--ink-400)]">/{pagesTotal}</span>
+            </span>
+            <span className="text-[var(--ink-500)]">pages</span>
+          </>
+        ) : (
+          <>
+            <span className="tabular-nums font-medium text-[var(--ink-900)]">
+              {tagsReady}
+              <span className="font-normal text-[var(--ink-400)]">/{tagsTotal}</span>
+            </span>
+            <span className="text-[var(--ink-500)]">viz ready</span>
+          </>
+        )}
+      </div>
+      <span className="viz-tooltip" role="tooltip">
+        {tip}
       </span>
-      <span className="text-[var(--ink-500)]">pages</span>
-      <span className="px-0.5 text-[var(--ink-300)]" aria-hidden>
-        |
-      </span>
-      <span className="tabular-nums font-medium text-[var(--ink-900)]">
-        {tagsReady}
-        <span className="font-normal text-[var(--ink-400)]">/{tagsTotal}</span>
-      </span>
-      <span className="text-[var(--ink-500)]">{tagsLabel}</span>
-    </div>
+    </span>
   );
 }
 
@@ -906,14 +937,16 @@ function KGStatusBadge({ docId }: { docId: string }) {
   }
 
   return (
-    <div
-      className="flex items-center gap-1.5 rounded-md border border-[var(--border-subtle)] bg-white px-2 py-1 text-[11px]"
-      title={title}
-    >
-      {icon}
-      <span className={`font-medium ${valueTone}`}>{label.split(" ")[0]}</span>
-      <span className={tone}>{label.split(" ").slice(1).join(" ")}</span>
-    </div>
+    <span className="viz-tooltip-anchor relative inline-flex">
+      <div className="flex items-center gap-1.5 rounded-md border border-[var(--border-subtle)] bg-white px-2 py-1 text-[11px]">
+        {icon}
+        <span className={`font-medium ${valueTone}`}>{label.split(" ")[0]}</span>
+        <span className={tone}>{label.split(" ").slice(1).join(" ")}</span>
+      </div>
+      <span className="viz-tooltip" role="tooltip">
+        Knowledge-graph agent — {title || "tracks per-concept mastery from your chats, flashcards and Feynman sessions."}
+      </span>
+    </span>
   );
 }
 

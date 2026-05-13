@@ -168,8 +168,9 @@ export default function UploadCard() {
       </h1>
 
       <p className="mt-7 max-w-2xl text-[15px] leading-[1.65] text-[var(--ink-700)]">
-        Drop a PDF. Chat with it, drill yourself on it, explain it back to a
-        curious eight-year-old. Watch a map of what you actually understand
+        Drop a PDF. Its hardest concepts come alive inline as you read.
+        Chat with it, drill yourself, explain it back to a curious
+        eight-year-old. Watch a map of what you actually understand
         grow — concept by concept, not page by page.
       </p>
 
