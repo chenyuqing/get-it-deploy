@@ -64,13 +64,11 @@ Get It is a desktop app. **Download the installer for your machine**, double-cli
 
 Builds for every released version are on the **[Releases](https://github.com/beltromatti/get-it/releases)** page.
 
-### First launch: what to expect
+### First launch
 
-1. **Update check.** Every boot, before anything else, Get It asks GitHub Releases whether there's a newer build for your platform. If there is, you see the version diff + release notes + one "Update now" button that downloads the right installer and hands it to the OS — your library and study data stay on disk untouched.
-2. **Setup wizard.** Checks that the bundled Codex CLI binary is present (Get It ships it for you — ~190 MB) and at the required version, then asks you to sign in. A browser tab opens for the standard ChatGPT / OpenAI OAuth flow; when you finish there, the dialog advances automatically.
-3. **Welcome card.** Once-per-version hello from the four students who built this — names, GitHub link, the feedback inbox. Dismiss with "Let's go" for the session, "Don't show again" to pin the dismissal to this release.
-4. The main window opens on **Upload**. Drop a PDF or pick one of the five bundled sample textbooks (anatomy, classical mechanics, Italian constitution, calculus, organic chemistry) — they're already inside the app, no extra step.
-5. Switch to **Library** at any time to see every PDF you've worked on. Click one and you land exactly where you left off — same tags on the document, same chat threads, same flashcard decks, same Feynman sessions, same knowledge-graph scores.
+Sign in to your **ChatGPT or OpenAI** account once — that's the only setup. Drop a PDF in, or pick one of the five bundled samples (anatomy, classical mechanics, Italian constitution, calculus, organic chemistry). Tags, chats, flashcard decks, Feynman sessions, knowledge graph: all stay on your computer, never on a server. Come back tomorrow and **Library** has every PDF you've opened, picked up exactly where you left them.
+
+Get It checks for a newer release on every launch and offers a one-click update — nothing to subscribe to, nothing to babysit.
 
 ### Storage
 
