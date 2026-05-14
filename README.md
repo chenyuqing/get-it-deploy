@@ -7,7 +7,7 @@
 **The study companion that turns a PDF into a measurable mastery map. Built around the document, not in place of it.**
 
 [![GDG AI Hack 2026](https://img.shields.io/badge/GDG%20AI%20Hack-Milan%202026-1a1a2e?style=for-the-badge)](https://gdg.community.dev/)
-[![Website](https://img.shields.io/badge/Website-getit.noesisai.it-5b66f1?style=for-the-badge&logo=vercel&logoColor=white)](https://getit.noesisai.it)
+[![Website](https://img.shields.io/badge/Website-getit.noesisai.it-5b66f1?style=for-the-badge&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJ3aGl0ZSIgc3Ryb2tlLXdpZHRoPSIyIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiPjxjaXJjbGUgY3g9IjEyIiBjeT0iMTIiIHI9IjEwIi8+PGxpbmUgeDE9IjIiIHkxPSIxMiIgeDI9IjIyIiB5Mj0iMTIiLz48cGF0aCBkPSJNMTIgMmExNS4zIDE1LjMgMCAwIDEgNCAxMCAxNS4zIDE1LjMgMCAwIDEtNCAxMCAxNS4zIDE1LjMgMCAwIDEtNC0xMCAxNS4zIDE1LjMgMCAwIDEgNC0xMHoiLz48L3N2Zz4=&logoColor=white)](https://getit.noesisai.it)
 [![Built with Codex CLI](https://img.shields.io/badge/Built%20with-Codex%20CLI-111113?style=for-the-badge&logo=openai&logoColor=white)](https://github.com/openai/codex)
 
 [![Next.js](https://img.shields.io/badge/Next.js-16-000000?logo=nextdotjs&logoColor=white)](https://nextjs.org)
