@@ -36,6 +36,36 @@ const nextConfig: NextConfig = {
       "./node_modules/@openai/codex/bin/codex.js",
     ],
   },
+  // Keep the tracer out of paths the Next.js server never needs at
+  // runtime. The default tracer is intentionally over-inclusive (it
+  // copies any file under `outputFileTracingRoot` that could plausibly
+  // be referenced), so leaving these in turns the standalone bundle
+  // from ~500 MB into ~4 GB — and on Windows that's enough to push the
+  // NSIS installer past the macroline-level `failed creating mmap`
+  // failure. `dist-electron/**` is the worst offender (a recursive
+  // self-include of previous build outputs); `electron/**` ships the
+  // ~200 MB platform Codex binary that the Electron shell wires up
+  // separately and that the Next server doesn't import.
+  outputFileTracingExcludes: {
+    "**/*": [
+      "dist-electron/**",
+      "electron/**",
+      "scripts/**",
+      ".next/cache/**",
+      "README.md",
+      "AGENTS.md",
+      "CLAUDE.md",
+      "LICENSE",
+      "hero.gif",
+      "technical-writeup.md",
+      "technical-writeup.pdf",
+      "eslint.config.mjs",
+      "postcss.config.mjs",
+      "tsconfig.json",
+      "tsconfig.tsbuildinfo",
+      "next.config.ts",
+    ],
+  },
   // Allow longer payloads for PDF uploads (default body limit is 1 MB).
   experimental: {
     serverActions: { bodySizeLimit: "20mb" },

@@ -109,4 +109,55 @@ module.exports = async function afterPack(context) {
     })(dest);
     console.log(`[after-pack] restored ${rel} (${fileCount} files)`);
   }
+
+  // Drop the wrong-platform Codex binaries.
+  //
+  // `@openai/codex`'s install pulls every supported platform tarball as
+  // an optional dep on whichever host npm runs on — a mac-arm dev box
+  // ends up with `@openai/codex-darwin-arm64` and the various stubs.
+  // electron-builder happily ships the whole node_modules tree into
+  // every target, so a Windows install made from a mac-arm host carries
+  // an unusable 184 MB darwin-arm64 codex binary inside it. We know
+  // exactly which triple the target needs (we staged it into
+  // `electron/codex-bin/<triple>/` ourselves); everything else is dead
+  // weight on disk and just slows the installer.
+  const arch = context.arch === 0
+    ? "ia32"
+    : context.arch === 1
+      ? "x64"
+      : context.arch === 2
+        ? "armv7l"
+        : context.arch === 3
+          ? "arm64"
+          : context.arch === 4
+            ? "universal"
+            : "x64";
+  const platformKey = platform === "darwin"
+    ? "darwin"
+    : platform === "win32"
+      ? "win32"
+      : "linux";
+  const keepPkg = `@openai/codex-${platformKey}-${arch}`;
+  const codexSubmodules = path.join(
+    appResources,
+    "node_modules",
+    "@openai",
+    "codex",
+    "node_modules",
+    "@openai",
+  );
+  if (fs.existsSync(codexSubmodules)) {
+    let pruned = 0;
+    for (const entry of fs.readdirSync(codexSubmodules)) {
+      if (`@openai/${entry}` === keepPkg) continue;
+      fs.rmSync(path.join(codexSubmodules, entry), {
+        recursive: true,
+        force: true,
+      });
+      pruned += 1;
+    }
+    if (pruned > 0) {
+      console.log(`[after-pack] pruned ${pruned} non-target Codex platform package(s); kept ${keepPkg}`);
+    }
+  }
 };

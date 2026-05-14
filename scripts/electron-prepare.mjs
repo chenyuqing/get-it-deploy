@@ -212,7 +212,20 @@ async function fetchPlatformPackage(targetTriple) {
   // Copy into electron/codex-bin so the Electron build picks it up.
   const exeName = targetTriple.startsWith("win32-") ? "codex.exe" : "codex";
   const srcVendor = path.join(nmDest, "vendor", triple);
-  const destVendor = path.join(REPO_ROOT, "electron", "codex-bin", triple);
+  const codexBinRoot = path.join(REPO_ROOT, "electron", "codex-bin");
+  // Drop any previously-staged triples so this build doesn't end up
+  // shipping a Codex binary for a different platform (running a
+  // mac-arm64 build right after a win-x64 build leaves the 247 MB
+  // win32-x64 codex.exe sitting next to the 192 MB aarch64-apple-darwin
+  // codex and electron-builder happily packages both).
+  if (fssync.existsSync(codexBinRoot)) {
+    for (const entry of fssync.readdirSync(codexBinRoot)) {
+      if (entry !== triple) {
+        fssync.rmSync(path.join(codexBinRoot, entry), { recursive: true, force: true });
+      }
+    }
+  }
+  const destVendor = path.join(codexBinRoot, triple);
   await fs.rm(destVendor, { recursive: true, force: true });
   await fs.mkdir(destVendor, { recursive: true });
   await copyDir(srcVendor, destVendor);

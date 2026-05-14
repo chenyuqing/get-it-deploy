@@ -201,12 +201,12 @@
   <body>
     <header>
       <h1>Almost there</h1>
-      <p>Get It uses OpenAI Codex to power every agent. Two quick checks and you're in — your study data never leaves this Mac/PC.</p>
+      <p id="header-blurb">Sign in with the ChatGPT account you already use — that's the one Get It.'s agents run against. Your study data never leaves this Mac/PC.</p>
     </header>
 
     <main>
-      <div class="step" id="step-install">
-        <div class="step-marker">1</div>
+      <div class="step" id="step-install" hidden>
+        <div class="step-marker" id="step-install-marker">1</div>
         <div style="min-width: 0; flex: 1;">
           <h2>Codex CLI</h2>
           <p id="install-desc">Checking…</p>
@@ -218,7 +218,7 @@
       </div>
 
       <div class="step" id="step-login">
-        <div class="step-marker">2</div>
+        <div class="step-marker" id="step-login-marker">1</div>
         <div style="min-width: 0; flex: 1;">
           <h2>Sign in with ChatGPT or OpenAI</h2>
           <p id="login-desc">A browser window will open to authenticate. The same login is used by Codex itself.</p>

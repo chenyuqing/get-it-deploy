@@ -199,8 +199,8 @@ async function startEmbeddedServer() {
   // Tell the SDK where the codex binary actually is — when we bundle the
   // platform-specific package outside the standalone trace, this lets it
   // skip module resolution entirely.
-  const codexBin = resolveCodexBinary();
-  if (codexBin) env.CODEX_BINARY_PATH = codexBin;
+  const codexInfo = resolveCodexBinary();
+  if (codexInfo) env.CODEX_BINARY_PATH = codexInfo.path;
 
   const nodeBin = process.execPath; // Electron's own node — works for ES modules
   // Spawn the watchdog wrapper if it was copied next to server.js by

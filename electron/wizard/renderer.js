@@ -2,7 +2,10 @@
 
 const els = {
   stepInstall: document.getElementById("step-install"),
+  stepInstallMarker: document.getElementById("step-install-marker"),
   stepLogin: document.getElementById("step-login"),
+  stepLoginMarker: document.getElementById("step-login-marker"),
+  headerBlurb: document.getElementById("header-blurb"),
   installDesc: document.getElementById("install-desc"),
   installStatus: document.getElementById("install-status"),
   btnInstall: document.getElementById("btn-install"),
@@ -17,6 +20,11 @@ const els = {
   btnOpenUrl: document.getElementById("btn-open-url"),
 };
 
+const BLURB_SIGNIN_ONLY =
+  "Sign in with the ChatGPT account you already use — that's the one Get It.'s agents run against. Your study data never leaves this Mac/PC.";
+const BLURB_INSTALL_AND_SIGNIN =
+  "We couldn't find Get It.'s bundled Codex CLI. Install a backup copy and sign in — your study data never leaves this Mac/PC.";
+
 let lastAuthUrl = null;
 let lastPhase = "idle";
 
@@ -26,40 +34,60 @@ function render(s) {
     ? `Platform: ${s.targetTriple}  ·  Required: ≥ ${s.requiredVersion}`
     : "";
 
-  // ── Step 1: install / version
-  const installOk = s.binaryFound && s.versionOk;
-  els.stepInstall.classList.toggle("done", installOk);
-  els.stepInstall.classList.toggle("active", !installOk && (s.phase ?? "idle") !== "logging-in");
-  els.stepInstall.classList.toggle("error", s.phase === "error" && !installOk);
-  if (!s.binaryFound) {
-    els.installDesc.textContent = `Codex CLI ${s.requiredVersion} is not installed. Install it now — it's a one-time download (~30 MB).`;
-    els.btnInstall.disabled = false;
-    els.btnInstall.textContent = "Install Codex CLI";
-  } else if (!s.versionOk) {
-    els.installDesc.textContent = `Codex CLI ${s.version ?? "?"} is installed but Get It. needs ≥ ${s.requiredVersion}. Update?`;
-    els.btnInstall.disabled = false;
-    els.btnInstall.textContent = "Update Codex CLI";
-  } else {
-    els.installDesc.textContent = `Codex CLI ${s.version} is ready.`;
-    els.btnInstall.disabled = true;
-    els.btnInstall.textContent = "Installed";
-  }
-  if (s.phase === "installing") {
-    els.installStatus.innerHTML = `<span class="spinner"></span>${escapeHtml(s.message || "Installing…")}`;
-    els.btnInstall.disabled = true;
-  } else if (s.phase === "error" && !installOk) {
-    els.installStatus.innerHTML = `<span class="err">${escapeHtml(s.message || "Failed.")}</span>`;
-  } else if (installOk) {
-    els.installStatus.innerHTML = `<span class="ok">✓ Ready</span>`;
-  } else {
-    els.installStatus.innerHTML = "";
+  // The bundled Codex binary ships inside the .app / installer for every
+  // user. The install step only surfaces on the rare path where the
+  // bundled copy is genuinely missing — antivirus quarantine, a partial
+  // install, or someone running `electron .` from source without first
+  // running `npm run electron:prepare`. The common path is one step:
+  // sign in.
+  const codexReady = s.binaryFound && s.versionOk;
+  const showInstallStep = !codexReady;
+
+  els.stepInstall.hidden = !showInstallStep;
+  els.stepInstallMarker.textContent = "1";
+  els.stepLoginMarker.textContent = showInstallStep ? "2" : "1";
+  els.headerBlurb.textContent = showInstallStep
+    ? BLURB_INSTALL_AND_SIGNIN
+    : BLURB_SIGNIN_ONLY;
+
+  // ── Step 1: install / version (only visible when bundled copy missing)
+  if (showInstallStep) {
+    els.stepInstall.classList.toggle("done", false);
+    els.stepInstall.classList.toggle(
+      "active",
+      (s.phase ?? "idle") !== "logging-in",
+    );
+    els.stepInstall.classList.toggle("error", s.phase === "error");
+    if (!s.binaryFound) {
+      els.installDesc.textContent = `Get It.'s bundled Codex CLI ${s.requiredVersion} is missing on this machine. Install a fresh copy now — one-time download, ~30 MB.`;
+      els.btnInstall.disabled = false;
+      els.btnInstall.textContent = "Install Codex CLI";
+    } else {
+      // binary present but version too old — only reachable for the
+      // node_modules / userdata sources, since the bundled copy's
+      // version is pinned at build time.
+      els.installDesc.textContent = `The Codex CLI on this machine is ${s.version ?? "an unknown version"}; Get It. needs ≥ ${s.requiredVersion}. Update?`;
+      els.btnInstall.disabled = false;
+      els.btnInstall.textContent = "Update Codex CLI";
+    }
+    if (s.phase === "installing") {
+      els.installStatus.innerHTML = `<span class="spinner"></span>${escapeHtml(s.message || "Installing…")}`;
+      els.btnInstall.disabled = true;
+    } else if (s.phase === "error") {
+      els.installStatus.innerHTML = `<span class="err">${escapeHtml(s.message || "Failed.")}</span>`;
+    } else {
+      els.installStatus.innerHTML = "";
+    }
   }
 
-  // ── Step 2: login (only enabled once install is OK)
+  // ── Sign-in step (always visible)
   els.stepLogin.classList.toggle("done", s.loggedIn);
-  els.stepLogin.classList.toggle("active", installOk && !s.loggedIn);
-  els.stepLogin.classList.toggle("error", s.phase === "error" && installOk && !s.loggedIn);
-  if (!installOk) {
+  els.stepLogin.classList.toggle("active", codexReady && !s.loggedIn);
+  els.stepLogin.classList.toggle(
+    "error",
+    s.phase === "error" && codexReady && !s.loggedIn,
+  );
+  if (!codexReady) {
     els.loginDesc.textContent = "Install Codex CLI first.";
     els.btnLogin.disabled = true;
     els.loginStatus.innerHTML = "";
@@ -69,7 +97,8 @@ function render(s) {
     els.btnLogin.textContent = "Signed in";
     els.loginStatus.innerHTML = `<span class="ok">✓ Connected</span>`;
   } else {
-    els.loginDesc.textContent = "A browser window will open. After you finish signing in there, this dialog continues automatically.";
+    els.loginDesc.textContent =
+      "A browser window will open. After you finish signing in there, this dialog continues automatically.";
     els.btnLogin.disabled = s.phase === "logging-in";
     els.btnLogin.textContent = "Sign in with ChatGPT";
     if (s.phase === "logging-in") {
@@ -92,7 +121,7 @@ function render(s) {
   }
 
   // ── Finish button — only enabled when everything green
-  els.btnFinish.disabled = !(installOk && s.loggedIn);
+  els.btnFinish.disabled = !(codexReady && s.loggedIn);
 
   lastPhase = s.phase ?? "idle";
 }

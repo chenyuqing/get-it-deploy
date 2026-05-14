@@ -106,37 +106,61 @@ function bundledStagedBinaryPaths() {
   return out;
 }
 
+function maybeChmod(p) {
+  if (process.platform === "win32") return;
+  try {
+    fs.chmodSync(p, 0o755);
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * Locate the Codex CLI binary. Returns `{ path, source }` or null.
+ *
+ *   source: "bundled" → electron/codex-bin/<triple>/codex/codex(.exe).
+ *           This is the canonical copy — electron-prepare.mjs stages it
+ *           at build time AND in dev (when `npm run electron:prepare`
+ *           runs from `npm run dev`). It's what we ship to every user.
+ *
+ *   source: "node_modules" → a last-resort dev fallback when someone
+ *           runs raw `electron .` without `electron:prepare` and happens
+ *           to have @openai/codex-<triple> as a transitive dep in
+ *           node_modules. Production builds never hit this.
+ *
+ *   source: "userdata" → the wizard-downloaded copy in
+ *           <userData>/codex-bundle/. The wizard only writes here when
+ *           the bundled copy is missing (corrupted install, antivirus
+ *           quarantine — the only realistic edge cases on Windows).
+ *
+ * The bundled copy always wins. We never look at $PATH, npm global, or
+ * any system-wide Codex install: behaviour must be identical for every
+ * user, regardless of whether they happen to be a developer.
+ */
 function resolveCodexBinary() {
   const triple = targetTriple();
-  const pkg = platformPackage();
-  if (!triple || !pkg) return null;
+  if (!triple) return null;
   const exe = process.platform === "win32" ? "codex.exe" : "codex";
-  // 1. Staged binary inside the packaged app
   for (const candidate of bundledStagedBinaryPaths()) {
     if (fs.existsSync(candidate)) {
-      try {
-        if (process.platform !== "win32") fs.chmodSync(candidate, 0o755);
-      } catch {
-        /* ignore */
-      }
-      return candidate;
+      maybeChmod(candidate);
+      return { path: candidate, source: "bundled" };
     }
   }
-  // 2. node_modules lookup (dev mode + recovery)
-  for (const root of candidateNodeModulesRoots()) {
-    const candidate = path.join(root, pkg, "vendor", triple, "codex", exe);
-    if (fs.existsSync(candidate)) {
-      try {
-        if (process.platform !== "win32") fs.chmodSync(candidate, 0o755);
-      } catch {
-        /* ignore */
+  const pkg = platformPackage();
+  if (pkg) {
+    for (const root of candidateNodeModulesRoots()) {
+      const candidate = path.join(root, pkg, "vendor", triple, "codex", exe);
+      if (fs.existsSync(candidate)) {
+        maybeChmod(candidate);
+        return { path: candidate, source: "node_modules" };
       }
-      return candidate;
     }
   }
-  // 3. User-data fallback (downloaded into ~/Library/Application Support/get-it/codex-bundle)
   const userDataBin = bundledCodexPath();
-  if (userDataBin && fs.existsSync(userDataBin)) return userDataBin;
+  if (userDataBin && fs.existsSync(userDataBin)) {
+    return { path: userDataBin, source: "userdata" };
+  }
   return null;
 }
 
@@ -425,12 +449,12 @@ async function showSetupWindow(opts = {}) {
 // ── codex login subprocess driver ───────────────────────────────────────
 function runCodexLogin(onLine) {
   return new Promise((resolve, reject) => {
-    const bin = resolveCodexBinary();
-    if (!bin) {
+    const resolved = resolveCodexBinary();
+    if (!resolved) {
       reject(new Error("Codex binary not available"));
       return;
     }
-    const child = spawn(bin, ["login"], {
+    const child = spawn(resolved.path, ["login"], {
       stdio: ["ignore", "pipe", "pipe"],
       env: process.env,
     });
@@ -466,13 +490,28 @@ function runCodexLogin(onLine) {
 const statusSubscribers = new Set();
 
 function refreshCodexStatus() {
-  const bin = resolveCodexBinary();
-  const version = bin ? getCodexVersion(bin) : null;
+  const resolved = resolveCodexBinary();
+  const bin = resolved ? resolved.path : null;
+  const source = resolved ? resolved.source : null;
+  // The bundled copy IS the version we declared as required — we shipped
+  // that exact file from electron-prepare.mjs at build time. Spawning
+  // `codex --version` just to read the same number back is wasted work
+  // and, worse, races against Windows Defender's first-launch scan of
+  // the 235 MB codex.exe: the scan routinely pushes spawnSync past its
+  // 5-second timeout, returns null, and the wizard renders "Codex CLI ?"
+  // with a useless Update button that re-downloads the same binary into
+  // userData. Trust the build-pinned version for bundled; spawn only for
+  // the userdata fallback and the dev node_modules path, where the
+  // version is genuinely unknown to us.
+  const version = source === "bundled"
+    ? (bin ? REQUIRED_CODEX_VERSION : null)
+    : (bin ? getCodexVersion(bin) : null);
   const versionOk = version ? semverGte(version, REQUIRED_CODEX_VERSION) : false;
   const loggedIn = bin && versionOk ? isCodexAuthenticated(bin) : false;
   const status = {
     binaryFound: !!bin,
     binaryPath: bin,
+    binarySource: source,
     version,
     requiredVersion: REQUIRED_CODEX_VERSION,
     versionOk,
