@@ -8,22 +8,24 @@ A developer-oriented walk through the codebase. The goal is that a contributor w
 
 ## Mental model
 
-Get It. is a desktop app for studying a single PDF at a time. Drop a file. Two pipelines fire in parallel from upload. The first one ships visualizations inline next to the text so the document is immediately easier to read. The second one builds a concept graph of the same document and scores the student's mastery on four orthogonal axes as they interact with four study tools (chat, flashcards, forced-choice quizzes, Feynman with a curious child). Every interaction lands in one append-only journal on disk. One evaluator agent reads that journal and updates the four-axis scores after every completed session.
+Get It. is a desktop app for studying a single PDF at a time. Drop a file — a fast, model-free quality gate first confirms the PDF is a digital, text-based document under 150 pages; a scanned, image-dominant, or text-sparse file is rejected up front with a clear message instead of silently feeding empty text to the agents. Once a file clears the gate, two pipelines fire in parallel from upload. The first one ships visualizations inline next to the text so the document is immediately easier to read. The second one builds a concept graph of the same document and scores the student's mastery on four orthogonal axes as they interact with four study tools (chat, flashcards, forced-choice quizzes, Feynman with a curious child). Every interaction lands in one append-only journal on disk. One evaluator agent reads that journal and updates the four-axis scores after every completed session.
 
 ```
-upload  ─┬──► pdfjs-dist extracts text + glyph bboxes per page
+upload  ─► quality gate (model-free) ─► pdfjs-dist extracts text + glyph bboxes per page
          │
          ├──► visualizer pipeline
-         │     ├─ per-page concept-detection agent  →  DetectedConcept[] with anchor strings
+         │     ├─ batched concept-detection agent  →  DetectedConcept[] with anchor strings
+         │     │   (≤5 pages per call, concurrency 3)   (each concept carries its page)
          │     └─ per-tag visualization-spec agent  →  3d / 2d-anim / formula / graph / 2d-text spec
-         │                                            (server-side syntax preflight + client-side
-         │                                             runtime repair loop on sandbox crashes)
+         │        (lazy: on click by default)           (server-side syntax preflight + client-side
+         │                                               runtime repair loop on sandbox crashes)
          │
          └──► knowledge-graph pipeline
                ├─ kg-build agent (one-shot)            →  6–25 concept nodes + typed edges + global note
-               └─ kg-evaluate agent (debounced)        →  per-node {memory, comprehension, structure,
-                  ◄── work-context journal                application} 0–100, monotone non-decreasing
-                  ◄── document text
+               │  ◄── full document text                  (bounded by the 150-page upload cap)
+               └─ kg-evaluate agent (incremental)      →  per-node {memory, comprehension, structure,
+                  ◄── current graph (baseline scores)     application} 0–100, monotone non-decreasing
+                  ◄── interactions since the last pass
 ```
 
 Persistent state is a tree of plain JSON files under one OS-native user-data directory. There is no database, no hosted backend, no shared key pool, no analytics SDK. Every model call is an `@openai/codex-sdk` invocation against the end user's own ChatGPT account.
@@ -47,12 +49,12 @@ app/                       Next.js App Router pages + API routes
   library/                 catalog of every opened PDF
   viewer/[docId]/          per-document viewer (PDF + right pane)
   api/
-    upload/                pdfjs extraction + new docId or sample reuse
+    upload/                pdfjs extraction + quality gate + new docId or sample reuse
     analyze-pdf/           legacy single-shot detection (preserved for tests)
     tags/[docId]/          server-owned tag store: GET / POST active-tag / etc.
-    jobs/detect/[docId]    POST → kicks the concept-detection job for a doc
+    jobs/detect/[docId]    POST → kicks the batched concept-detection job for a doc
     jobs/viz/[docId]       POST → kicks per-tag viz-spec generation
-    chat/[docId]           POST → chat turn (triggers scheduleEvaluation)
+    chat/[docId]           POST → chat turn on a native Codex thread (start / resume)
     flashcards/[docId]     POST generate / rate / end (triggers scheduleEvaluation)
     quizzes/[docId]        POST generate / answer / end (triggers scheduleEvaluation)
     feynman/[docId]        POST start / explain (triggers scheduleEvaluation)
@@ -68,12 +70,12 @@ components/                React UI (orchestrators + scene renderers + tag UI)
   CodexHealthBanner.tsx    error banner + countdown + re-connect
 
 lib/                       framework-agnostic helpers
-  codex.ts                 the one and only LLM transport: runJson + error classifier
+  codex.ts                 the one LLM transport: runJson + runJsonInThread + error classifier
   agents/                  per-agent prompt builders (detect, viz)
   kg.ts / kg-runner.ts     KG persistence + build/eval runners + scheduler
   store.ts                 doc cache + filesystem persistence
   paths.ts                 the OS-native data-dir resolver
-  pdf-extract.ts           pdfjs-dist text + bbox extraction
+  pdf-extract.ts           pdfjs-dist text + bbox extraction + upload quality gate
   schemas.ts schemas-kg.ts JSON schemas for every agent
   work-context*.ts         journal storage + evaluator summary
   viz-runtime.ts           the `new Function` sandbox compiler
@@ -82,19 +84,19 @@ lib/                       framework-agnostic helpers
 
 ## The agent layer
 
-Every call to OpenAI funnels through one helper at [`lib/codex.ts`](lib/codex.ts) → `runJson(prompt, outputSchema, opts)`. The helper:
+Every call to OpenAI funnels through [`lib/codex.ts`](lib/codex.ts). The stateless workhorse is `runJson(prompt, outputSchema, opts)`; the chat tool additionally uses `runJsonInThread(...)`, which **starts or resumes a native Codex thread** so a multi-turn conversation transmits the document once and each follow-up turn carries only the new message. Both paths share the same client, sandbox, schema enforcement, and error handling. The helper:
 
 1. Lazily initialises one `Codex` client per process.
-2. Starts a fresh thread with `sandboxMode: "read-only"`, `approvalPolicy: "never"`, `skipGitRepoCheck: true`, and an explicit working directory under `<DATA_DIR>/codex-scratch`. The renderer never sees a turn that escaped its own working dir.
+2. Starts a fresh thread — or resumes a stored `threadId` — with `sandboxMode: "read-only"`, `approvalPolicy: "never"`, `skipGitRepoCheck: true`, and an explicit working directory under `<DATA_DIR>/codex-scratch`. The renderer never sees a turn that escaped its own working dir.
 3. Runs the turn against the supplied JSON Schema, retries once on parse failure, and returns the typed result.
 4. Catches every throw, classifies it into `auth_lost` / `rate_limit` / `binary_missing` / `generic`, and writes the result into a process-local **health mailbox**. The renderer polls `/api/codex/health` to render a banner. Rate-limit retry deadlines are extracted from the error message when present.
 5. Short-circuits future calls while a rate-limit window is still active so a chatty UI cannot burn a hundred wasted calls.
 
-Nine prompts live behind that one helper:
+Nine prompts live behind that transport:
 
 | Where | What it returns | Schema |
 |---|---|---|
-| `lib/agents/detect.ts` | `DetectedConcept[]` for a single page | `detectionSchema` in `lib/schemas.ts` |
+| `lib/agents/detect.ts` | `DetectedConcept[]` for a batch of up to 5 pages (each concept tagged with its page) | `detectionSchema` in `lib/schemas.ts` |
 | `lib/agents/viz.ts` | Per-tag visualization spec (one of five renderer types) | `vizSchemaFor(type)` in `lib/schemas.ts` |
 | `lib/kg-runner.ts → BUILD_SYSTEM` | The graph: 6–25 nodes, typed edges, global note | `kgBuildSchema` in `lib/schemas-kg.ts` |
 | `lib/kg-runner.ts → EVALUATE_SYSTEM` | Per-node updates {memory, comprehension, structure, application} + notes | `kgEvaluateSchema` |
@@ -108,9 +110,9 @@ There is no god-prompt and no client-side JSON-Schema validation. Every agent re
 
 ## The visualizer pipeline
 
-The pipeline that ships time-to-value: tags appear inline the instant detection returns, the right pane fills in as each per-tag agent finishes.
+The pipeline that ships time-to-value: tags appear inline the instant detection returns. By default a tag's visualization is generated **lazily** — the first time the student clicks the tag — so model usage stays proportional to what they actually open; this matters on long documents, where a single PDF can carry hundreds of tags. An opt-in `auto-generate` setting flips this back to eager mode, rendering every tag in parallel as soon as detection finds it. Either way, a ready tag is marked with a thin emerald ring so the student can tell at a glance which visualizations already exist.
 
-**Server-side jobs.** Detection and per-tag viz generation are not renderer loops. Both are first-class **server-side jobs**, singleton-per-doc, idempotent, running inside the Next process. The detection job walks unanalysed pages with concurrency 3 and persists each batch of new tags to `<DATA_DIR>/docs/<docId>/tags.json` as it goes. The viz job picks the next tag whose state is `generating: true`, runs the per-type agent at concurrency 4, and persists the spec back to the same file. The viewer is a *consumer*: it polls `GET /api/tags/<docId>` every 1.5 s while any job is in flight, fires `POST /api/jobs/viz/<docId>` on a user click or a sandbox runtime-error report, and only ever updates the *active-tag selection* on the server. The active selection is the lone field the client can write; everything else is server-owned, so a concurrent client navigation cannot overwrite mid-flight detection or generation.
+**Server-side jobs.** Detection and per-tag viz generation are not renderer loops. Both are first-class **server-side jobs**, singleton-per-doc, idempotent, running inside the Next process. The detection job walks unanalysed pages in batches of up to five pages per Codex call, runs those batches at concurrency 3, and persists each batch of new tags to `<DATA_DIR>/docs/<docId>/tags.json` as it goes — each detected concept carries the page it belongs to, so one call can tag five pages at once and a 100-page document costs roughly twenty detection calls instead of a hundred. The viz job picks the next tag whose state is `generating: true`, runs the per-type agent at concurrency 4, and persists the spec back to the same file. The viewer is a *consumer*: it polls `GET /api/tags/<docId>` every 1.5 s while any job is in flight, fires `POST /api/jobs/viz/<docId>` on a user click or a sandbox runtime-error report, and only ever updates the *active-tag selection* on the server. The active selection is the lone field the client can write; everything else is server-owned, so a concurrent client navigation cannot overwrite mid-flight detection or generation.
 
 Reopening a doc from the Library weeks later therefore restores the exact tag layout, viz specs, and analysed-pages set without re-detection. Library badges poll the same source so they stay live across the whole catalog with no extra plumbing.
 
@@ -141,9 +143,9 @@ This is the layer that turns Get It. from a viewer into a measurement instrument
 | **structure** | grasp of how concepts connect | multi-step reasoning that bridges concepts, references to prerequisites, sibling discrimination |
 | **application** | transfer to new cases | original examples, edge cases, novel problem solving, applied-tier quiz answers |
 
-The evaluator sees the entire work-context journal (compacted and timestamped via `summariseForEvaluator`), the current graph with previous scores, and the document's own page text. Its system prompt enforces three rules: scores are **monotone non-decreasing**, *quantity does not entitle a score*, and concepts with no observable evidence stay at their previous level. The runtime enforces the monotone rule with a clamp on every update (`clampMonotone` in `lib/kg-runner.ts`) so a chatty interaction cannot accidentally erase prior evidence even if the agent disregards its own instruction.
+The evaluator sees the current graph with each node's previous scores as a baseline, plus **only the interactions since the last pass** (compacted via `summariseForEvaluator`, which filters the journal by timestamp). Earlier evidence is already encoded in the baseline, so a pass stays cheap no matter how long the journal grows — and because scores only ever rise, nothing is lost by not re-reading the old transcript. Its system prompt enforces three rules: scores are **monotone non-decreasing**, *quantity does not entitle a score*, and concepts with no observable evidence stay at their previous level. The runtime enforces the monotone rule with a clamp on every update (`clampMonotone` in `lib/kg-runner.ts`) so a chatty interaction cannot accidentally erase prior evidence even if the agent disregards its own instruction.
 
-**Scheduling.** Each evaluator pass is one Codex turn at medium effort. The chat tool is chatty by definition, so we run a per-doc queue with at most one in-flight pass and one pending. Every tool route fires `scheduleEvaluation(docId)` and returns immediately. The client polls `/api/kg/[docId]/state` (which exposes the live `evaluating` flag), accelerating to 2.5 s while the agent is working and slowing to 6 s when idle. The badge in the top tab bar reads "Building graph", "Evaluating", "No evaluations yet", or "Synced 12 s ago" depending on what the queue is doing.
+**Scheduling.** Each evaluator pass is one Codex turn at medium effort, coalesced through a per-doc queue with at most one in-flight pass and one pending. Flashcards, quizzes, and Feynman fire `scheduleEvaluation(docId)` when a session-worth of evidence lands (a deck closes, a quiz ends, a Feynman session wraps) and return immediately. Chat is chatty by definition, so it is deliberately **not** evaluated per reply: the student chats freely and the client fires a single pass when they leave the Chat tab (`POST /api/kg/[docId]/evaluate`). A pass that finds no new interactions since the last one returns without spending a call. The client polls `/api/kg/[docId]/state` (which exposes the live `evaluating` flag), accelerating to 2.5 s while the agent is working and slowing to 6 s when idle. The badge in the top tab bar reads "Building graph", "Evaluating", "No evaluations yet", or "Synced 12 s ago" depending on what the queue is doing.
 
 A rate-limit hit inside an evaluator pass schedules a `setTimeout` for `retryAt + 500 ms` that re-fires `scheduleEvaluation`. No user action needed; the graph keeps catching up on its own.
 
@@ -151,7 +153,7 @@ A rate-limit hit inside an evaluator pass schedules a `setTimeout` for `retryAt 
 
 The four tools are deliberately small and deliberately different. Each provides a distinct evidence type.
 
-- **Chat.** Multi-turn, multi-thread, scoped to one document. The knowledge-graph node list and a 30 KB document excerpt are injected as system context. Each assistant reply triggers a debounced KG re-evaluation.
+- **Chat.** Multi-turn, multi-thread, scoped to one document. The first turn opens a native Codex thread seeded with the knowledge-graph node list and the full document text; later turns resume that thread (by stored `threadId`) and send only the new message, so the document is transmitted once per conversation instead of re-injected on every reply. The student can chat freely across as many turns as they like; a single KG re-evaluation runs when they leave the Chat tab.
 
 - **Flashcards.** Open-recall under self-grade. The student picks a topic (or "all"), Codex generates a 4–10 card deck, the student optionally types their answer, reveals, and self-grades 1–4 (Again / Hard / Good / Easy, the FSRS convention). Ratings are recorded per card; closing a deck triggers an evaluator pass.
 
@@ -159,7 +161,7 @@ The four tools are deliberately small and deliberately different. Each provides 
 
 - **Feynman.** The agent plays a curious eight-year-old who asks 3 to 4 short, pointed questions. The student is forced into the role of the teacher. After the last turn a separate summary call writes a 3–6-sentence honest read of where the explanation held and where it broke down. The session is bounded so the data stays usable for the evaluator and the student does not drift.
 
-Behind all four sits one artifact: the **work-context JSON**, one file per doc on the server, append-only by convention. Every chat message, every card rating, every quiz answer, every Feynman turn lands here with a UTC timestamp. It is the file the evaluator reads, the file the student can download from the right-pane menu, and by design the only thing the system needs to remember about a study session. Backwards-compatible loading (`loadWorkContext`) back-fills any array that did not exist when the doc's journal was first written, so quizzes added in v1.1.0 work cleanly against pre-quiz journals from v1.0.0.
+Behind all four sits one artifact: the **work-context JSON**, one file per doc on the server, append-only by convention. Every chat message, every card rating, every quiz answer, every Feynman turn lands here with a UTC timestamp. It is the file the evaluator reads, the file the student can download from the right-pane menu, and by design the only thing the system needs to remember about a study session. Backwards-compatible loading (`loadWorkContext`) back-fills any array that did not exist when the doc's journal was first written, so quizzes added in v1.1.0 work cleanly against pre-quiz journals from v1.0.0; it back-fills new optional fields the same way — per-interaction timestamps (which the incremental evaluator filters on) and the chat's Codex `threadId` — so journals written before v1.2.0 evaluate and resume without a migration step.
 
 ## Persistent state and the types-split pattern
 
@@ -190,7 +192,7 @@ Cheap, recoverable, OS-agnostic, and a clear seam to lift to a hosted backend if
 
 **Types-split pattern.** Modules are split into pure-TS `*-types.ts` files (no `node:fs` imports) and storage helpers in `*.ts` that do touch the filesystem. Next.js bundles a transitively-imported module into the client when *any* type from it is referenced, including a bare `import type {}`. Splitting types into a node-free file is the only way to keep `lib/kg.ts` and `lib/work-context.ts` server-only without poisoning the browser bundle. The comments in those files say so explicitly.
 
-**Settings.** [`lib/config.ts`](lib/config.ts) reads env defaults for the two runtime-mutable settings (`NEXT_PUBLIC_AUTO_GENERATE_VIZ`, `NEXT_PUBLIC_MAX_VIZ_GEN_RETRIES`) and persists overrides to `<DATA_DIR>/settings.json`. The dynamic localhost port the packaged app binds to changes on every launch, so anything cookie- or localStorage-scoped to the origin would forget the user's choice; a plain file in the user-data dir is the only thing that survives a restart. A change broadcasts a `getit:settings` window event so other pages on the same renderer react without polling.
+**Settings.** [`lib/config.ts`](lib/config.ts) reads env defaults for the two runtime-mutable settings (`NEXT_PUBLIC_AUTO_GENERATE_VIZ`, which defaults to off so visualizations are generated lazily on click, and `NEXT_PUBLIC_MAX_VIZ_GEN_RETRIES`) and persists overrides to `<DATA_DIR>/settings.json`. The dynamic localhost port the packaged app binds to changes on every launch, so anything cookie- or localStorage-scoped to the origin would forget the user's choice; a plain file in the user-data dir is the only thing that survives a restart. A change broadcasts a `getit:settings` window event so other pages on the same renderer react without polling.
 
 ## Resilience to Codex outages
 
@@ -291,6 +293,7 @@ Everything beyond `277ec43` is post-hackathon polish that turned the demo into a
 - **Quizzes tool** (v1.1.0). The fourth study surface, with `crypto.randomInt`-driven option shuffle so the agent's positional bias does not leak.
 - **Cross-arch CI**. Both macOS targets now build on `macos-latest`; the Intel slice cross-compiles.
 - **Bring-your-own-account messaging**. The Notice, the writeup section above, the in-app wizard copy: all aligned so the legal posture and the product positioning are the same sentence.
+- **Long-document support** (v1.2.0). The push that makes a 100-page PDF usable without exploding the user's Codex usage, at unchanged output quality. A model-free upload-quality gate rejects scanned / image-dominant / over-long files before any agent runs. Concept detection batches up to five pages per call. Chat moved onto a native Codex thread, so the document is sent once and follow-ups only carry the new message. KG evaluation became incremental (baseline scores plus only the new interactions) and chat now batches a single pass per visit instead of one per reply. Per-call character caps were removed across every prompt so the agents reason over whole sections rather than truncated fragments, and visualization generation defaults to lazy/on-click.
 
 The hackathon clock is no longer a load-bearing constraint, but the product it forced us into has not moved.
 

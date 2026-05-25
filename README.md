@@ -39,10 +39,10 @@ Get It. is the layer that answers it.
 
 ## How it works
 
-Drop a PDF. Three things start at once.
+Drop a PDF — a digital, text-based one. Get It. checks the file up front and turns away scans or image-only documents with a clear message, because it reads text, not pictures. Once a file clears that gate, three things start at once.
 
 1. **The page tags itself.** A concept-detection agent walks every page and plants inline tag pills on the words that benefit from a picture. Each tag carries a renderer choice: 3D scene, 2D animation, formula walkthrough, plotted graph, or cited source.
-2. **The right pane fills in.** Up to four visualizations render in parallel as the document is read. Three.js for anatomy and molecules, Canvas for physics and chemistry animations, KaTeX-clean formulas, a plot engine for functions and distributions, authoritative quotes for legal articles and named papers. When a sandbox crashes, the agent reads its own error and re-emits a fix. The student sees "repairing" instead of red text.
+2. **The right pane fills in.** Click a tag and its visualization renders — Three.js for anatomy and molecules, Canvas for physics and chemistry animations, KaTeX-clean formulas, a plot engine for functions and distributions, authoritative quotes for legal articles and named papers. Ready tags are marked so you can tell what already exists, and a setting renders every tag automatically as you read if you prefer. When a sandbox crashes, the agent reads its own error and re-emits a fix. The student sees "repairing" instead of red text.
 3. **A knowledge graph builds itself.** Six to twenty-five concept nodes, typed edges, sized by mastery, coloured by progress, clickable for the four-axis breakdown plus the evaluator's note.
 
 Then the loop closes. Four study tools feed one journal.
@@ -145,26 +145,28 @@ Releases are tag-driven. Push a `vX.Y.Z` tag to `main` and `.github/workflows/re
 ## Architecture in one breath
 
 ```
-upload  ─┬──► pdfjs-dist extracts text + glyph bboxes per page
+upload  ─► quality gate (model-free) ─► pdfjs-dist extracts text + glyph bboxes per page
          │
          ├──► visualizer pipeline
-         │     ├─ per-page concept-detection agent  →  DetectedConcept[] with anchor strings
+         │     ├─ batched concept-detection agent  →  DetectedConcept[] with anchor strings
+         │     │   (≤5 pages per call, concurrency 3)   (each concept carries its page)
          │     └─ per-tag visualization-spec agent  →  3d / 2d-anim / formula / graph / 2d-text spec
-         │                                            (server-side syntax preflight + client-side
-         │                                             runtime repair loop on sandbox crashes)
+         │        (lazy: on click by default)           (server-side syntax preflight + client-side
+         │                                               runtime repair loop on sandbox crashes)
          │
          └──► knowledge-graph pipeline
                ├─ kg-build agent (one-shot)            →  6–25 concept nodes + typed edges + global note
-               └─ kg-evaluate agent (debounced)        →  per-node {memory, comprehension, structure,
-                  ◄── work-context journal                application} 0–100, monotone non-decreasing
-                  ◄── document text
+               │  ◄── full document text                  (bounded by the 150-page upload cap)
+               └─ kg-evaluate agent (incremental)      →  per-node {memory, comprehension, structure,
+                  ◄── current graph (baseline scores)     application} 0–100, monotone non-decreasing
+                  ◄── interactions since the last pass
 ```
 
 Nine prompts behind one auth path, nine schemas behind one shared SDK wrapper. The full design rationale, the four-axis rubric, the per-doc evaluator queue, the LLM-code sandbox, and the desktop-packaging layer are in [`technical-writeup.md`](technical-writeup.md), also rendered as [PDF](technical-writeup.pdf).
 
 ## The team
 
-Built in 24 hours at **GDG AI Hack 2026, Milan**, for the **Braynr** challenge. The hackathon submission lived at commit `277ec43`. Everything past that commit is post-hackathon polish: desktop packaging, the persistent Library, the first-launch setup wizard, the quizzes tool, the in-app auto-update flow, the server-side jobs runner. The product is the same. Only the way it gets onto a student's laptop has changed.
+Built in 24 hours at **GDG AI Hack 2026, Milan**, for the **Braynr** challenge. The hackathon submission lived at commit `277ec43`. Everything past that commit is post-hackathon polish: desktop packaging, the persistent Library, the first-launch setup wizard, the quizzes tool, the in-app auto-update flow, the server-side jobs runner, and long-document support that keeps a 100-page PDF affordable on a single ChatGPT plan. The product is the same. Only the way it gets onto a student's laptop has changed.
 
 - **Mattia Beltrami**, Politecnico di Milano
 - **Matteo Impieri**, Politecnico di Milano
