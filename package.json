@@ -96,11 +96,16 @@
     "mac": {
       "category": "public.app-category.education",
       "target": "dmg",
-      "identity": null,
       "hardenedRuntime": false,
       "gatekeeperAssess": false,
+      "entitlements": "electron/assets/entitlements.mac.plist",
+      "entitlementsInherit": "electron/assets/entitlements.mac.plist",
       "extendInfo": {
-        "CFBundleDisplayName": "Get It."
+        "CFBundleDisplayName": "Get It.",
+        "NSCameraUsageDescription": "Get It. does not access the camera; this entry is required by Apple's notarization rules because Electron's helper has the AVFoundation surface compiled in.",
+        "NSMicrophoneUsageDescription": "Get It. does not access the microphone; this entry is required by Apple's notarization rules because Electron's helper has the AVFoundation surface compiled in.",
+        "NSDocumentsFolderUsageDescription": "Get It. may read PDFs you explicitly pick from your Documents folder.",
+        "NSDownloadsFolderUsageDescription": "Get It. may read PDFs you explicitly pick from your Downloads folder."
       }
     },
     "win": {

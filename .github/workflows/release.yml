@@ -5,9 +5,20 @@ name: Release
 # artifact, and at the end the publish job creates a GitHub Release tied
 # to the tag with all artifacts attached.
 #
-# We do not auto-sign Mac/Windows builds — see README → Releases for the
-# manual gatekeeper exception path. CI builds are unsigned but identical
-# in every other respect to a local build.
+# macOS builds are signed with a Developer ID Application certificate
+# AND notarized by Apple when the runtime secrets are present:
+#
+#   MAC_DEVELOPER_ID_CERT_BASE64        base64 of the .p12 cert+key
+#   MAC_DEVELOPER_ID_CERT_PASSWORD      password for the .p12
+#   APPLE_API_KEY_BASE64                base64 of the .p8 ASC API key
+#   APPLE_API_KEY_ID                    the key's 10-char ID
+#   APPLE_API_ISSUER                    the issuer UUID
+#
+# When all five are set, scripts/build-electron.mjs picks the
+# `developer-id` branch automatically and the published DMG opens on a
+# fresh macOS download with no Gatekeeper prompt. When the cert secret
+# is missing, the matrix falls back to ad-hoc signing (the legacy
+# behaviour). Windows builds are not auto-signed.
 
 on:
   push:
@@ -91,11 +102,68 @@ jobs:
       - name: Prepare standalone (sync assets, fetch codex binary for target)
         run: node scripts/electron-prepare.mjs --target=${{ matrix.triple }}
 
+      # ── macOS code signing setup ───────────────────────────────────────
+      # Decodes the .p12 secret into a fresh one-shot keychain on the
+      # runner so `security find-identity -p codesigning` lists the
+      # Developer ID Application cert, then build-electron.mjs's
+      # signing detection sees the cert the same way it sees it on a
+      # local Mac and flips electron-builder into the developer-id
+      # branch. Short-circuits cleanly when the secret is missing —
+      # the build then falls back to the ad-hoc path.
+      - name: Import Developer ID certificate (macOS jobs only)
+        if: startsWith(matrix.target, 'mac-')
+        env:
+          MAC_DEVELOPER_ID_CERT_BASE64: ${{ secrets.MAC_DEVELOPER_ID_CERT_BASE64 }}
+          MAC_DEVELOPER_ID_CERT_PASSWORD: ${{ secrets.MAC_DEVELOPER_ID_CERT_PASSWORD }}
+        shell: bash
+        run: |
+          if [ -z "$MAC_DEVELOPER_ID_CERT_BASE64" ]; then
+            echo "MAC_DEVELOPER_ID_CERT_BASE64 secret is empty — falling back to ad-hoc build."
+            exit 0
+          fi
+          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 32)"
+          CERT_PATH="$RUNNER_TEMP/devid.p12"
+          echo -n "$MAC_DEVELOPER_ID_CERT_BASE64" | base64 --decode > "$CERT_PATH"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" \
+            -P "$MAC_DEVELOPER_ID_CERT_PASSWORD" \
+            -A -t cert -f pkcs12 \
+            -k "$KEYCHAIN_PATH"
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | tr -d '"')
+          rm -f "$CERT_PATH"
+          echo "Signing identities available to the runner:"
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+
+      - name: Stage App Store Connect notary key (macOS jobs only)
+        if: startsWith(matrix.target, 'mac-')
+        env:
+          APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+        shell: bash
+        run: |
+          if [ -z "$APPLE_API_KEY_BASE64" ]; then
+            echo "APPLE_API_KEY_BASE64 secret is empty — notarization will be skipped."
+            exit 0
+          fi
+          mkdir -p "$RUNNER_TEMP/apple"
+          KEY_PATH="$RUNNER_TEMP/apple/AuthKey.p8"
+          echo -n "$APPLE_API_KEY_BASE64" | base64 --decode > "$KEY_PATH"
+          chmod 600 "$KEY_PATH"
+          echo "APPLE_API_KEY=$KEY_PATH" >> "$GITHUB_ENV"
+
       - name: Build desktop (${{ matrix.target }})
         env:
-          # Disable code signing in CI. Local releases ship unsigned; the
-          # README walks the user through the one-time Gatekeeper allow.
-          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          # APPLE_API_KEY (path) is exported in the previous step via
+          # $GITHUB_ENV when the secret is set. The other two come
+          # straight from secrets; build-electron.mjs reads them
+          # alongside the keychain to pick the signing mode.
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: node scripts/build-electron.mjs --target=${{ matrix.target }}
 

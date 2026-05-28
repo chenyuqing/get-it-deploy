@@ -260,7 +260,17 @@ CI: pushing a `v*.*.*` tag to `main` triggers `.github/workflows/release.yml`. T
 3. Uploads each artefact to a workflow artifact.
 4. A final `publish` job collects them and creates the GitHub Release tied to the tag.
 
-Builds are **ad-hoc code-signed** on macOS via an electron-builder `afterSign` hook (`scripts/electron-after-sign.cjs`) that runs `codesign --force --deep --sign -` over the staged `.app` before the `.dmg` is bundled. Ad-hoc satisfies the Apple Silicon kernel's mandatory-signature requirement — without it M-series Macs reject the bundle outright as "damaged" rather than showing the bypassable Gatekeeper prompt. Real Developer ID certificates + notarization remove the prompt entirely; that is a funding decision deferred to a sustainable moment, not a missing piece of the architecture. The first-launch Gatekeeper / SmartScreen warning is dismissed once via System Settings → Privacy & Security → Open Anyway and never seen again.
+macOS builds are **signed with a paid Apple Developer ID Application certificate and notarized by Apple** in the same `scripts/build-electron.mjs` invocation that produces the `.dmg`. The pipeline auto-detects what the host has:
+
+- **`developer-id`** — a "Developer ID Application" identity is in the keychain *and* the App Store Connect API key trio is exported (`APPLE_API_KEY` path to the `.p8`, `APPLE_API_KEY_ID`, `APPLE_API_ISSUER`). `build-electron.mjs` adds `--config.mac.hardenedRuntime=true --config.mac.notarize=true` to electron-builder, which signs every Mach-O with the cert, ships the bundle to Apple's notary service, and staples the returned ticket onto the `.app` *inside* the `.dmg`. Gatekeeper opens the download with no prompt because the stapled ticket is consulted before the network is.
+- **`developer-id-no-notary`** — cert is present but no notary credentials. We still sign (and keep Hardened Runtime on so the build is notarizable later) but skip the notary call. Useful for one-off local checks before secrets land in CI.
+- **`ad-hoc`** — neither the cert nor the env-var pair is present (or `CSC_IDENTITY_AUTO_DISCOVERY=false` was set explicitly to force the legacy path). The `afterSign` hook (`scripts/electron-after-sign.cjs`) runs `codesign --force --deep --sign -` over the staged `.app` so the Apple Silicon kernel's mandatory-signature check still passes; without that step M-series Macs reject the bundle outright as "damaged" rather than showing the bypassable Gatekeeper prompt. First launch needs a one-time System Settings → Privacy & Security → Open Anyway dance.
+
+The `afterSign` hook reads `process.env.GETIT_MAC_SIGNING_MODE` to decide which branch ran upstream. In the two `developer-id*` modes the hook only re-verifies the existing signature — overwriting a Developer ID signature with an ad-hoc one would break notarization. In `ad-hoc` mode the hook performs the codesign pass.
+
+CI plumbing lives in `.github/workflows/release.yml`. The macOS matrix jobs decode two secrets into runner-temp files (`MAC_DEVELOPER_ID_CERT_BASE64` → a one-shot keychain via `security create-keychain` + `security import` + `security set-key-partition-list`; `APPLE_API_KEY_BASE64` → a `.p8` at a path exported via `$GITHUB_ENV`) before `build-electron.mjs` runs, then the same detection picks the `developer-id` branch automatically. The keychain and key file are scoped to the runner and disappear with the VM.
+
+Windows builds are not signed: SmartScreen reputation is per-certificate and the project doesn't currently pay for a Windows code-signing cert. The first launch on Windows still shows the SmartScreen prompt; click **More info → Run anyway**.
 
 ## Auto-update
 
@@ -305,7 +315,7 @@ A few choices are deliberately deferred.
 
 **A hosted multi-user backend.** Out of scope by design. Get It. runs locally against the user's own Codex login, against their own PDFs, on their own machine. The Braynr policy band (source-grounded only, local-first, tiered access) we get for free at this scale.
 
-**Notarized code signing.** macOS builds are ad-hoc signed in CI (free, kernel-acceptable on Apple Silicon); a paid Developer ID + Apple notarization would remove the first-launch "unidentified developer" prompt entirely. That step is a funding decision, not a missing piece of the architecture.
+**Windows code signing.** Windows builds are still unsigned: SmartScreen reputation is per-certificate and Microsoft's path to a Gatekeeper-equivalent zero-warning download (Azure Trusted Signing) requires a paid Azure subscription the project doesn't carry. The macOS notarization story is already in place (see *Desktop packaging* above); Windows is the remaining funding decision, not a missing piece of the architecture.
 
 ---
 

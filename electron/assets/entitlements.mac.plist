@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <!--
+      Standard Electron-on-macOS entitlements required by Apple's
+      Hardened Runtime + notarization. Without `allow-jit` the V8
+      compiler crashes at startup; without `allow-unsigned-executable-
+      memory` Three.js' WebGL shader compile path trips the runtime
+      check. `allow-dyld-environment-variables` keeps electron-builder's
+      bundled-framework loader happy. `disable-library-validation`
+      covers the rare case where Electron loads a dylib that wasn't
+      re-signed under our Developer ID — Electron ships it in its own
+      default entitlements upstream for the same reason.
+
+      We also need camera/mic/files usage descriptions in Info.plist
+      (set under build.mac.extendInfo) so notarized apps that include
+      WebRTC / file pickers don't get rejected; we don't actually call
+      those APIs in Get It., but Electron's default entitlement chain
+      enables the AVFoundation / file-system surface so Apple wants
+      the descriptions present.
+    -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+    <true/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+  </dict>
+</plist>

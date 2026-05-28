@@ -18,7 +18,7 @@
  * .github/workflows/release.yml.
  */
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -63,6 +63,111 @@ function run(cmd, cmdArgs, opts = {}) {
   });
 }
 
+/**
+ * Inspects the host for the artefacts needed to produce a fully
+ * Developer-ID-signed and Apple-notarized macOS DMG. Returns the
+ * electron-builder CLI flags and env-var overrides for the detected
+ * mode. There are three viable states:
+ *
+ *   1. `developer-id` — a "Developer ID Application" identity is in the
+ *      keychain AND the App Store Connect API key trio is exported
+ *      (APPLE_API_KEY = path to the .p8, APPLE_API_KEY_ID, APPLE_API_ISSUER)
+ *      or the legacy Apple-ID password trio (APPLE_ID +
+ *      APPLE_APP_SPECIFIC_PASSWORD + APPLE_TEAM_ID). Flags flip
+ *      `mac.hardenedRuntime` and `mac.notarize` to true; electron-
+ *      builder signs every binary with the cert, ships the bundle to
+ *      Apple's notary service, and staples the ticket onto the .app
+ *      inside the .dmg. Gatekeeper opens the download with no prompt.
+ *
+ *   2. `developer-id-no-notary` — cert is present but no notary
+ *      credentials. We keep Hardened Runtime on so the build is
+ *      notarizable later, but skip the notarization step. Useful for
+ *      local one-off checks before the secrets are wired up; a
+ *      quarantined download will still trip Gatekeeper.
+ *
+ *   3. `ad-hoc` — no Developer ID cert (or explicit
+ *      `CSC_IDENTITY_AUTO_DISCOVERY=false` override). Falls back to
+ *      the legacy free path: the electron-after-sign.cjs hook does an
+ *      ad-hoc codesign pass that satisfies the Apple Silicon mandatory
+ *      signature kernel check; first launch still asks the user to
+ *      bypass the "unidentified developer" prompt once via System
+ *      Settings → Privacy & Security → Open Anyway.
+ *
+ * The mode is also written into `process.env.GETIT_MAC_SIGNING_MODE`
+ * so the `electron-after-sign.cjs` hook running inside electron-
+ * builder can read it (the hook is invoked in the same process tree
+ * as this script) and decide whether to skip the ad-hoc pass.
+ */
+function resolveMacSigningMode() {
+  const identityProbe = spawnSync(
+    "security",
+    ["find-identity", "-v", "-p", "codesigning"],
+    { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+  );
+  const identityOutput =
+    (identityProbe.stdout || "") + (identityProbe.stderr || "");
+  const hasDeveloperIdCert = /Developer ID Application/.test(identityOutput);
+
+  const ascApiKeyPath = (process.env.APPLE_API_KEY || "").trim();
+  const ascApiKeyId = (process.env.APPLE_API_KEY_ID || "").trim();
+  const ascApiIssuer = (process.env.APPLE_API_ISSUER || "").trim();
+  const hasAscApiKey = ascApiKeyPath && ascApiKeyId && ascApiIssuer;
+
+  const appleId = (process.env.APPLE_ID || "").trim();
+  const appSpecificPassword = (process.env.APPLE_APP_SPECIFIC_PASSWORD || "").trim();
+  const appleTeamId = (process.env.APPLE_TEAM_ID || "").trim();
+  const hasApplePasswordTrio = appleId && appSpecificPassword && appleTeamId;
+
+  const hasNotaryCreds = hasAscApiKey || hasApplePasswordTrio;
+
+  const explicitAdHoc =
+    String(process.env.CSC_IDENTITY_AUTO_DISCOVERY ?? "").toLowerCase() === "false";
+
+  if (!hasDeveloperIdCert || explicitAdHoc) {
+    return {
+      mode: "ad-hoc",
+      extraArgs: [],
+      extraEnv: {
+        CSC_IDENTITY_AUTO_DISCOVERY: "false",
+        GETIT_MAC_SIGNING_MODE: "ad-hoc",
+      },
+    };
+  }
+
+  if (!hasNotaryCreds) {
+    return {
+      mode: "developer-id-no-notary",
+      extraArgs: [
+        "--config.mac.hardenedRuntime=true",
+        "--config.mac.notarize=false",
+      ],
+      extraEnv: { GETIT_MAC_SIGNING_MODE: "developer-id-no-notary" },
+    };
+  }
+
+  return {
+    mode: "developer-id",
+    extraArgs: [
+      "--config.mac.hardenedRuntime=true",
+      "--config.mac.notarize=true",
+    ],
+    extraEnv: { GETIT_MAC_SIGNING_MODE: "developer-id" },
+  };
+}
+
+function describeMacSigningMode(mode) {
+  switch (mode) {
+    case "developer-id":
+      return "Developer ID signing + Apple notarization (Gatekeeper-clean download)";
+    case "developer-id-no-notary":
+      return "Developer ID signing only (no notary creds — first-launch prompt remains)";
+    case "ad-hoc":
+      return "ad-hoc signature (no Developer ID cert; System Settings bypass required first time)";
+    default:
+      return mode;
+  }
+}
+
 async function buildOne(targetKey) {
   const t = TARGETS[targetKey];
   if (!t) throw new Error(`Unknown target ${targetKey}. Known: ${Object.keys(TARGETS).join(", ")}`);
@@ -71,7 +176,28 @@ async function buildOne(targetKey) {
     path.join("scripts", "electron-prepare.mjs"),
     `--target=${t.prepareTriple}`,
   ]);
-  await run("npx", ["--no-install", "electron-builder", ...t.builderFlag, "--publish", "never"]);
+
+  const isMacTarget = targetKey === "mac-arm64" || targetKey === "mac-x64";
+  const signing = isMacTarget
+    ? resolveMacSigningMode()
+    : { mode: "not-mac", extraArgs: [], extraEnv: {} };
+
+  if (isMacTarget) {
+    console.log(`    signing: ${describeMacSigningMode(signing.mode)}`);
+  }
+
+  await run(
+    "npx",
+    [
+      "--no-install",
+      "electron-builder",
+      ...t.builderFlag,
+      "--publish",
+      "never",
+      ...signing.extraArgs,
+    ],
+    { env: { ...process.env, ...signing.extraEnv } },
+  );
   console.log(`=== ${targetKey} done ===`);
 }
 

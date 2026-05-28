@@ -90,14 +90,11 @@ The setup wizard verifies the bundled Codex CLI, walks the OAuth sign-in, and re
 
 ### Gatekeeper and SmartScreen
 
-Builds are **ad-hoc code-signed**, not notarized. A paid Apple Developer ID is a funding decision deferred for now; ad-hoc is the free path that still satisfies the Apple Silicon kernel's mandatory-signature requirement (without it M-series Macs report the bundle as "damaged" and refuse to open it at all).
+macOS builds (both Apple Silicon and Intel) are **signed with a paid Apple Developer ID Application certificate AND notarized by Apple**. On a fresh download from this repo's [Releases](https://github.com/beltromatti/get-it/releases) page the OS opens the app with **no Gatekeeper prompt** — the stapled notarization ticket tells Gatekeeper the binary is trusted before the network is even consulted. `spctl --assess` reports `source=Notarized Developer ID` and `xcrun stapler validate` passes on both architectures.
 
-The first launch on macOS still asks you to confirm the developer:
+Windows builds are not signed. The first launch shows a SmartScreen warning ("Windows protected your PC"); click **More info → Run anyway**. The warning persists because SmartScreen reputation is per-certificate and we currently don't ship a Windows code-signing cert (Microsoft's Trusted Signing service requires a paid Azure subscription that the project doesn't carry).
 
-- **System Settings.** Double-click `Get It.app` → dismiss the "unidentified developer" warning → open **System Settings → Privacy & Security**, scroll to the "Get It.app was blocked" row, and click **Open Anyway**. macOS Sequoia (15) and macOS 26 removed the older right-click → Open shortcut, so this is the canonical path.
-- **CLI.** `xattr -dr com.apple.quarantine "/Applications/Get It.app"` strips the download-quarantine flag in one shot.
-
-Windows shows a SmartScreen warning the first time. Click **More info** → **Run anyway**.
+If you ever pull a build that *wasn't* notarized — a local ad-hoc build before secrets are wired up, an old release from before v1.2.1 — macOS shows the "unidentified developer" prompt instead. The bypass is **System Settings → Privacy & Security → Open Anyway** (macOS Sequoia 15 and macOS 26 removed the older right-click → Open shortcut). Or strip the quarantine flag in one shot from the CLI: `xattr -dr com.apple.quarantine "/Applications/Get It.app"`.
 
 ### Storage
 
