@@ -205,6 +205,17 @@ function ensureIpc() {
 
   ipcMain.handle("update:install", async () => {
     if (!pending) throw new Error("No update pending");
+    // Count this as an in-app self-update so the dashboard can separate
+    // updates from genuine first-time downloads. Fire-and-forget; never let
+    // it affect the update itself.
+    try {
+      require("./analytics").trackUpdate(
+        pending.currentVersion,
+        pending.latestVersion,
+      );
+    } catch {
+      /* ignore */
+    }
     const url = pending.asset.downloadUrl;
     const filename = pending.asset.name;
     const downloads = app.getPath("downloads") || os.tmpdir();

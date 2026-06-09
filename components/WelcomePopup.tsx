@@ -277,10 +277,10 @@ function WelcomeCard({
 
       <div className="mx-6 my-4 rounded-xl border border-[var(--border-subtle)] bg-white px-4 py-3 text-[12px] leading-relaxed text-[var(--ink-700)]">
         <p>
-          <strong>Free, forever, and yours to shape.</strong> Your study data
-          stays on this computer: no accounts, no telemetry. Got a bug, a
-          missing feature, or code you want to send our way? Tell us, we&apos;re
-          listening.
+          <strong>Free, forever, and yours to shape.</strong> Your documents
+          and study journal never leave this computer: no accounts, no cloud
+          sync. Got a bug, a missing feature, or code you want to send our way?
+          Tell us, we&apos;re listening.
         </p>
         <div className="mt-3 flex flex-col gap-1.5">
           <a

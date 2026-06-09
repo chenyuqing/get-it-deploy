@@ -65,6 +65,7 @@ const {
   onCodexStatusChange,
 } = require("./setup");
 const { maybeRunUpdate } = require("./updater");
+const analytics = require("./analytics");
 
 // ── Single-instance lock ────────────────────────────────────────────────
 // If the user double-clicks the app icon a second time, focus the existing
@@ -416,9 +417,16 @@ app.whenReady().then(async () => {
     // the normal boot sequence.
     const userKickedOffUpdate = await maybeRunUpdate();
     if (userKickedOffUpdate) {
-      // updater.js calls app.quit() on its own; just bail out.
+      // updater.js calls app.quit() on its own; just bail out. The "update"
+      // analytics event is fired from the updater itself, so we don't also
+      // count this launch as an "open" — it's an update, not a session.
       return;
     }
+
+    // Anonymous "the app launched" ping (fire-and-forget). Counts a real
+    // session: only fired once we've decided NOT to update and are booting
+    // the app for use. Powers Total/Daily/Weekly/Monthly users.
+    analytics.trackOpen();
 
     // Run the codex wizard. We can't start the Next server without
     // codex — the agents would crash on the first request.

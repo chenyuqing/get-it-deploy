@@ -66,7 +66,7 @@ You sign in once with the ChatGPT account you already pay for (or an OpenAI API 
 
 - **You pay for AI once.** ChatGPT Plus, Pro, Team, Enterprise, or Edu covers everything Get It. does.
 - **Plus is the practical floor.** The free tier signs in but its Codex allowance is intentionally small. Plus and above give comfortable session headroom in the same flow.
-- **Your data stays yours.** No backend, no upload step, no analytics. The work-context journal is a single JSON file on your disk, downloadable in one click from the right-pane menu.
+- **Your data stays yours.** Your documents and study journal never leave your computer: no accounts, no cloud sync, no document upload, no model traffic through our servers. The only thing the app sends is an anonymous open/update ping — a random install id, the app version, and your OS, nothing else — so we can count how many people Get It. is helping; set `GETIT_DISABLE_ANALYTICS=1` to turn even that off. The work-context journal is a single JSON file on your disk, downloadable in one click from the right-pane menu.
 - **Rate limits are OpenAI's.** When you hit one, the app shows a countdown banner and resumes the background work itself once the window clears.
 
 Other AI study apps wrap a marked-up subscription around a model API the vendor holds. Get It. wraps a study workflow around the access you already have.
