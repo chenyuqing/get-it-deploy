@@ -39,6 +39,7 @@ electron/                  desktop shell + setup wizard + auto-update
   main.js                  single-instance lock, data dir resolution, server spawn
   setup.js                 Codex CLI install + OAuth wizard window
   updater.js               GitHub Releases poll, in-app installer flow
+  analytics.js             anonymous open/update ping (opt-out via env)
   update-window/           wizard HTML/JS for the update modal
   wizard/                  wizard HTML/JS for the first-launch wizard
   codex-bin/<triple>/      bundled Codex CLI per platform/arch
@@ -70,7 +71,8 @@ components/                React UI (orchestrators + scene renderers + tag UI)
   CodexHealthBanner.tsx    error banner + countdown + re-connect
 
 lib/                       framework-agnostic helpers
-  codex.ts                 the one LLM transport: runJson + runJsonInThread + error classifier
+  codex.ts                 the one LLM transport: runJson + runJsonInThread + SDK wrapper
+  codex-errors.ts          pure error model: classifier + friendly payloads (no SDK dep)
   agents/                  per-agent prompt builders (detect, viz)
   kg.ts / kg-runner.ts     KG persistence + build/eval runners + scheduler
   store.ts                 doc cache + filesystem persistence
@@ -87,10 +89,12 @@ lib/                       framework-agnostic helpers
 Every call to OpenAI funnels through [`lib/codex.ts`](lib/codex.ts). The stateless workhorse is `runJson(prompt, outputSchema, opts)`; the chat tool additionally uses `runJsonInThread(...)`, which **starts or resumes a native Codex thread** so a multi-turn conversation transmits the document once and each follow-up turn carries only the new message. Both paths share the same client, sandbox, schema enforcement, and error handling. The helper:
 
 1. Lazily initialises one `Codex` client per process.
-2. Starts a fresh thread — or resumes a stored `threadId` — with `sandboxMode: "read-only"`, `approvalPolicy: "never"`, `skipGitRepoCheck: true`, and an explicit working directory under `<DATA_DIR>/codex-scratch`. The renderer never sees a turn that escaped its own working dir.
+2. Starts a fresh thread — or resumes a stored `threadId` — with an **explicitly pinned model** (`gpt-5.5`), `sandboxMode: "read-only"`, `approvalPolicy: "never"`, `skipGitRepoCheck: true`, and an explicit working directory under `<DATA_DIR>/codex-scratch`. Pinning the model matters: the SDK only passes `--model` when we set it, so if we leave it blank the bundled binary resolves the model itself — from the user's personal `~/.codex/config.toml`, else a default compiled into the binary. That baked-in default can be a model OpenAI has since retired for ChatGPT-account auth, which 400s for everyone who doesn't already have a local config overriding it. Pinning makes every install — across OS, arch, and environment — deterministically use the same supported model. The renderer never sees a turn that escaped its own working dir.
 3. Runs the turn against the supplied JSON Schema, retries once on parse failure, and returns the typed result.
-4. Catches every throw, classifies it into `auth_lost` / `rate_limit` / `binary_missing` / `generic`, and writes the result into a process-local **health mailbox**. The renderer polls `/api/codex/health` to render a banner. Rate-limit retry deadlines are extracted from the error message when present.
+4. Catches every throw, classifies it into `auth_lost` / `rate_limit` / `binary_missing` / `model_unsupported` / `generic`, and writes the result into a process-local **health mailbox**. The renderer polls `/api/codex/health` to render a banner. `model_unsupported` (the pinned model aged out server-side) tells the user to update the app. Rate-limit retry deadlines are extracted from the error message when present, and when a quota message carries no deadline we apply a conservative fallback cooldown so the short-circuit below always has a window to act on.
 5. Short-circuits future calls while a rate-limit window is still active so a chatty UI cannot burn a hundred wasted calls.
+
+The pure error model (the `CodexError` kinds, the classifier, and the friendly per-kind payloads the request/response routes return) lives in a separate `codex-errors.ts` with no SDK import, so it stays unit-testable in isolation; `codex.ts` re-exports it.
 
 Nine prompts live behind that transport:
 
@@ -132,7 +136,7 @@ Reopening a doc from the Library weeks later therefore restores the exact tag la
 
 This is the layer that turns Get It. from a viewer into a measurement instrument. Two agents, one persistence file, one queue.
 
-**`kg-build`** runs once per document at upload time. The system prompt asks for 6–25 concept nodes the student would actually need to master (not a glossary), typed edges (prerequisite / composition / causal / specialisation / contrast), and a short global note that the viewer prints above the graph. Output is written to `<DATA_DIR>/docs/<docId>/kg.json` with `status: "ready"`. Rate-limited or auth-lost failures leave the KG in `status: "building"` and re-fire on a setTimeout once the deadline passes; the badge keeps spinning until the next attempt picks up cleanly.
+**`kg-build`** runs once per document at upload time. The system prompt asks for 6–25 concept nodes the student would actually need to master (not a glossary), typed edges (prerequisite / composition / causal / specialisation / contrast), and a short global note that the viewer prints above the graph. Output is written to `<DATA_DIR>/docs/<docId>/kg.json` with `status: "ready"`. Any failure — an account-level Codex error or a one-off — moves the graph to `status: "error"` with the reason, so the KG view drops its spinner and shows a **Retry** button. There is no automatic retry: the build re-runs on demand, and the health banner explains an account-level failure in the meantime.
 
 **`kg-evaluate`** is the four-axis rubric. Every node carries four 0–100 scores:
 
@@ -147,7 +151,7 @@ The evaluator sees the current graph with each node's previous scores as a basel
 
 **Scheduling.** Each evaluator pass is one Codex turn at medium effort, coalesced through a per-doc queue with at most one in-flight pass and one pending. Flashcards, quizzes, and Feynman fire `scheduleEvaluation(docId)` when a session-worth of evidence lands (a deck closes, a quiz ends, a Feynman session wraps) and return immediately. Chat is chatty by definition, so it is deliberately **not** evaluated per reply: the student chats freely and the client fires a single pass when they leave the Chat tab (`POST /api/kg/[docId]/evaluate`). A pass that finds no new interactions since the last one returns without spending a call. The client polls `/api/kg/[docId]/state` (which exposes the live `evaluating` flag), accelerating to 2.5 s while the agent is working and slowing to 6 s when idle. The badge in the top tab bar reads "Building graph", "Evaluating", "No evaluations yet", or "Synced 12 s ago" depending on what the queue is doing.
 
-A rate-limit hit inside an evaluator pass schedules a `setTimeout` for `retryAt + 500 ms` that re-fires `scheduleEvaluation`. No user action needed; the graph keeps catching up on its own.
+An evaluator pass that fails — including on an account-level Codex error — simply stops; evaluation is best-effort background scoring, so the next genuine tool interaction schedules a fresh pass and the graph catches up then. We deliberately do **not** auto-retry on a timer (see *Resilience to Codex outages* for why that pattern was removed).
 
 ## The four study tools and the work-context journal
 
@@ -196,20 +200,25 @@ Cheap, recoverable, OS-agnostic, and a clear seam to lift to a hosted backend if
 
 ## Resilience to Codex outages
 
-Every Codex call funnels through `runJson` in [`lib/codex.ts`](lib/codex.ts). That helper classifies failures into four kinds and writes the latest one into a process-local **health mailbox**.
+Every Codex call funnels through `runJson` in [`lib/codex.ts`](lib/codex.ts). That helper classifies failures into five kinds and writes the latest one into a process-local **health mailbox**.
 
 | Kind | Trigger | UI behaviour |
 |---|---|---|
 | `auth_lost` | 401 / token revoked / "sign in" message | Banner + "Re-connect" button re-opens the desktop setup wizard |
-| `rate_limit` | 429 / "try again in N" / 5-hour / weekly window phrases | Banner with live countdown to `retryAt`; auto-disappears when the deadline passes |
+| `rate_limit` | 429 / "try again in N" / 5-hour / weekly window phrases | Banner with a live countdown to `retryAt` (a fallback cooldown when the message carries no deadline); auto-clears when the window passes |
 | `binary_missing` | Codex binary not found at the resolved path | Banner + button to re-install via the wizard |
+| `model_unsupported` | "model is not supported" / the pinned model retired server-side | Banner telling the user to download the latest Get It. |
 | `generic` | Anything else | Banner with the raw message |
 
-Two things hang off the mailbox:
+**The in-app banner.** The renderer polls `/api/codex/health` (fast cadence while there is an active problem, slow cadence otherwise) and renders [`components/CodexHealthBanner.tsx`](components/CodexHealthBanner.tsx). The countdown updates locally so the banner stays smooth between polls.
 
-1. **The in-app banner.** The renderer polls `/api/codex/health` (fast cadence while there is an active problem, slow cadence otherwise) and renders [`components/CodexHealthBanner.tsx`](components/CodexHealthBanner.tsx). The countdown updates locally so the banner stays smooth between polls.
+**Fail fast, retry by hand — never auto-loop.** Earlier versions auto-resumed background work on a `setTimeout` keyed off `retryAt`. That had a sharp edge: a ChatGPT-account quota message often carries no parseable deadline, so `retryAt` was undefined, the backoff gate (which keyed on it) was never taken, and the viz queue re-picked the same still-`generating` tags and re-hit the wall as fast as calls completed — a tight loop that re-opened the banner the instant the user dismissed it. The fix is two-part: every rate-limit now gets a concrete deadline (parsed, or a fallback cooldown) so the short-circuit always fires, and more fundamentally **no background job auto-retries on a Codex error**. Instead each surface stops cleanly and offers a manual retry:
 
-2. **The kg-evaluator queue.** Hitting a rate-limit inside an evaluator pass schedules a `setTimeout` for `retryAt + 500 ms` that re-fires `scheduleEvaluation(docId)`. The build agent does the same: it leaves the KG in `status: "building"` instead of erroring out so the badge keeps spinning and the next attempt picks up cleanly. Tool routes (chat / flashcards / quizzes / Feynman) preserve the work-context journal up to the failure point so the student can re-send the same action once the banner clears: no lost messages, no orphan card ratings, no half-finished Feynman session.
+- **Viz queue + detection** stop on any account-level error and drop the `generating` spinner from every still-pending tag, returning them to an idle, click-to-retry state (plus a Retry button in the Visualizer footer). A generic per-concept failure marks only that tag and the queue moves on.
+- **KG build** moves to an `error` state with a Retry button; **KG evaluation** just stops and is re-triggered by the next interaction.
+- **Request/response tools** (chat / flashcards / quizzes / Feynman) return a friendly `{ kind, message }` instead of an opaque 500, and the view shows it inline next to a Retry control. Chat's send is **atomic** — the user message and the reply are committed together, only on success — so a retry never duplicates the turn; Feynman's "explain" turn is atomic the same way and rolls back its optimistic state on failure.
+
+The one retry loop that stays is the visualizer's **code-repair** loop (a sandbox runtime error feeds the broken code back to Codex for a corrected spec, bounded by `max-repair-attempts`). That is a content-level fix for the model's own output, not a backend-outage retry, and it is unchanged.
 
 `runJson` also short-circuits future Codex calls while a rate-limit window is still active. A chatty UI cannot burn a hundred wasted calls hoping the next one succeeds.
 
@@ -250,13 +259,13 @@ Two boot guards worth knowing about.
 Multi-target builds run from `scripts/build-electron.mjs`. Locally:
 
 ```bash
-node scripts/build-electron.mjs --target=mac-arm64   # or mac-x64 / win-x64 / --all
+node scripts/build-electron.mjs --target=mac-arm64   # or mac-x64 / win-x64 / linux-x64 / --all
 ```
 
 CI: pushing a `v*.*.*` tag to `main` triggers `.github/workflows/release.yml`. The workflow:
 
 1. Rewrites `package.json#version` from the pushed tag so the same number flows into Info.plist / NSIS metadata, into `NEXT_PUBLIC_APP_VERSION` for the in-app version chip, and into the asset filenames.
-2. Builds each target on a native runner: macOS Apple Silicon and macOS Intel both run on `macos-latest`, the latter cross-building via `electron-builder --mac --x64` because GitHub's Intel runners (`macos-13`) are being deprecated and queue times are unreliable. Windows builds on `windows-latest`. There are no native modules in the bundle (the standalone server is pure JS, the Codex binary is fetched per target by `electron-prepare.mjs`) so cross-arch is clean.
+2. Builds each target on a native runner: macOS Apple Silicon and macOS Intel both run on `macos-latest`, the latter cross-building via `electron-builder --mac --x64` because GitHub's Intel runners (`macos-13`) are being deprecated and queue times are unreliable. Windows builds on `windows-latest`, and Linux x64 builds a portable `.AppImage` on `ubuntu-latest` (electron-builder bundles `appimagetool`; the macOS signing steps are gated to the mac targets, so Linux skips them). There are no native modules in the bundle (the standalone server is pure JS, the Codex binary — including the static-musl Linux build — is fetched per target by `electron-prepare.mjs`) so cross-arch is clean.
 3. Uploads each artefact to a workflow artifact.
 4. A final `publish` job collects them and creates the GitHub Release tied to the tag.
 
@@ -304,6 +313,9 @@ Everything beyond `277ec43` is post-hackathon polish that turned the demo into a
 - **Cross-arch CI**. Both macOS targets now build on `macos-latest`; the Intel slice cross-compiles.
 - **Bring-your-own-account messaging**. The Notice, the writeup section above, the in-app wizard copy: all aligned so the legal posture and the product positioning are the same sentence.
 - **Long-document support** (v1.2.0). The push that makes a 100-page PDF usable without exploding the user's Codex usage, at unchanged output quality. A model-free upload-quality gate rejects scanned / image-dominant / over-long files before any agent runs. Concept detection batches up to five pages per call. Chat moved onto a native Codex thread, so the document is sent once and follow-ups only carry the new message. KG evaluation became incremental (baseline scores plus only the new interactions) and chat now batches a single pass per visit instead of one per reply. Per-call character caps were removed across every prompt so the agents reason over whole sections rather than truncated fragments, and visualization generation defaults to lazy/on-click.
+- **Signed and notarized macOS** (v1.2.1). Developer ID signing plus Apple notarization end to end, so a fresh download opens with no Gatekeeper prompt (see *Desktop packaging*).
+- **Reliability and reach** (this release). The model is now pinned explicitly (`gpt-5.5`) so a retired binary default can't 400 users out of every generative feature, with a dedicated `model_unsupported` banner. Every background job stops cleanly on a Codex error and offers a manual retry instead of auto-looping — the fix for a rate-limit retry loop that could re-fire the banner endlessly. **Linux x64** joined macOS and Windows as a first-class AppImage target. An anonymous open/update ping powers real Total / Daily / Weekly / Monthly user counts on the marketing dashboard, cleanly separating genuine installs from in-app updates.
+- **Open source, in the open.** The project is Apache-2.0 and actively seeks contributors; a [`CONTRIBUTING.md`](CONTRIBUTING.md) lays out the vision and a Discord community is where the work is coordinated.
 
 The hackathon clock is no longer a load-bearing constraint, but the product it forced us into has not moved.
 
