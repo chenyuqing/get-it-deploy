@@ -63,7 +63,16 @@ const VIZ_TONE_TOKENS: Record<VizTone, { bg: string; fg: string; ring: string }>
 };
 
 export function vizTypeStyle(type: VizType): VizTypeStyle {
-  const tokens = VIZ_TONE_TOKENS[VIZ_TYPE_META[type].tone];
+  const meta = VIZ_TYPE_META[type];
+  if (!meta) {
+    // Fallback for unknown types
+    return {
+      "--viz-bg": "var(--tag-rose-bg)",
+      "--viz-fg": "var(--tag-rose-fg)",
+      "--viz-ring": "var(--tag-rose-ring)",
+    };
+  }
+  const tokens = VIZ_TONE_TOKENS[meta.tone];
   return {
     "--viz-bg": tokens.bg,
     "--viz-fg": tokens.fg,

@@ -76,6 +76,20 @@ export default function ViewerClient({ docId }: { docId: string }) {
 
   const [activeTagId, setActiveTagId] = useState<string | null>(null);
 
+  // Resizable right pane — use pixel width instead of percentage
+  const [rightPaneWidth, setRightPaneWidth] = useState(600); // Default 600px
+  const [isDragging, setIsDragging] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Initialize right pane width on mount based on actual container size
+  useEffect(() => {
+    if (containerRef.current) {
+      const containerWidth = containerRef.current.offsetWidth - 16; // minus padding
+      const initialWidth = Math.min(Math.max(containerWidth * 0.44, 420), containerWidth * 0.75);
+      setRightPaneWidth(initialWidth);
+    }
+  }, []); // Run once on mount
+
   // Settings (auto-generate, max repair attempts) — start from env-baked
   // defaults, hydrate from /api/settings, react to `getit:settings`
   // CustomEvents the SettingsButton fires.
@@ -344,6 +358,69 @@ export default function ViewerClient({ docId }: { docId: string }) {
     [docId],
   );
 
+  // Force regenerate the current active tag's visualization
+  const handleRegenerateViz = useCallback(() => {
+    if (!activeTagId) return;
+    const tag = tags.find((t) => t.id === activeTagId);
+    if (!tag) return;
+
+    // Clear all viz-related state to force a fresh generation
+    setTags((prev) =>
+      prev.map((t) =>
+        t.id === activeTagId
+          ? {
+              ...t,
+              spec: undefined,
+              generating: true,
+              error: undefined,
+              attempts: undefined,
+              lastRuntimeError: undefined,
+            }
+          : t
+      )
+    );
+
+    void fetch(`/api/jobs/viz/${docId}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ tagId: activeTagId }),
+    }).catch(() => {});
+  }, [docId, activeTagId, tags]);
+
+  // Handle resizable pane dragging
+  const handleMouseDown = useCallback(() => {
+    setIsDragging(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isDragging) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!containerRef.current) return;
+      const containerRect = containerRef.current.getBoundingClientRect();
+      const containerWidth = containerRect.width - 16; // Subtract padding (p-2 = 8px * 2)
+      const mouseX = e.clientX - containerRect.left - 8; // Adjust for left padding
+
+      // Calculate new right pane width in pixels
+      const newWidth = containerWidth - mouseX - 2; // -2 for divider width
+      const maxWidth = containerWidth * 0.75; // Max 75% of container
+      const clampedWidth = Math.max(420, Math.min(maxWidth, newWidth)); // Clamp to min 420px and max 75%
+      setRightPaneWidth(clampedWidth);
+    };
+
+    const handleMouseUp = () => {
+      setIsDragging(false);
+    };
+
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", handleMouseUp);
+
+    return () => {
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [isDragging]);
+
   // When auto-generate flips off → on mid-session, ask the server to
   // queue every still-idle tag so the right pane fills in without the
   // user clicking each one. The server-side detection job already
@@ -449,8 +526,15 @@ export default function ViewerClient({ docId }: { docId: string }) {
         </div>
       </div>
 
-      <div className="flex min-h-0 flex-1 gap-2 bg-[var(--surface-canvas)] p-2">
-        <div className="min-w-0 flex-1 overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-white">
+      <div
+        ref={containerRef}
+        className="relative min-h-0 flex-1 bg-[var(--surface-canvas)] p-2"
+      >
+        {/* Left PDF panel */}
+        <div
+          className="absolute left-2 top-2 bottom-2 overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-white"
+          style={{ right: `${rightPaneWidth + 10}px` }}
+        >
           <PdfViewer
             pdfUrl={meta.pdfUrl}
             numPages={meta.numPages}
@@ -461,7 +545,26 @@ export default function ViewerClient({ docId }: { docId: string }) {
             detecting={detecting}
           />
         </div>
-        <div className="flex w-[44%] min-w-[420px] max-w-[720px] flex-col overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-white">
+
+        {/* Resizable divider */}
+        <div
+          className="absolute top-2 bottom-2 w-2 cursor-col-resize hover:bg-[var(--accent-100)] active:bg-[var(--accent-200)] transition-colors group z-10 flex items-center justify-center"
+          onMouseDown={handleMouseDown}
+          style={{
+            right: `${rightPaneWidth + 8}px`,
+            userSelect: 'none'
+          }}
+        >
+          <div className="absolute inset-y-0 w-1 bg-[var(--border-subtle)] group-hover:bg-[var(--accent-400)] transition-colors" />
+        </div>
+
+        {/* Right panel - fixed to right edge */}
+        <div
+          className="absolute top-2 bottom-2 right-2 flex flex-col overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-white"
+          style={{
+            width: `${rightPaneWidth}px`
+          }}
+        >
           <RightPane
             docId={docId}
             mode={rightPaneMode}
@@ -488,6 +591,7 @@ export default function ViewerClient({ docId }: { docId: string }) {
                     : "Click any tag to generate its visualization. (manual mode — toggle auto-generate in settings)",
               activeTagError: activeTag?.error ?? null,
               onRetry: activeTag ? () => handleTagClick(activeTag.id) : undefined,
+              onRegenerate: activeTag && activeSpec ? handleRegenerateViz : undefined,
             }}
           />
         </div>

@@ -116,6 +116,7 @@ type Props = {
     onRuntimeError?: (msg: string) => void;
     activeTagError?: string | null;
     onRetry?: () => void;
+    onRegenerate?: () => void;
   };
 };
 
@@ -127,6 +128,7 @@ export default function RightPane({ docId, mode, onModeChange, visualizer }: Pro
         mode={mode}
         onModeChange={onModeChange}
         visualizerSpec={visualizer.spec}
+        onRegenerateViz={visualizer.onRegenerate}
       />
 
       <div className="relative min-h-0 flex-1 bg-white">
@@ -194,11 +196,13 @@ function Header({
   mode,
   onModeChange,
   visualizerSpec,
+  onRegenerateViz,
 }: {
   docId: string;
   mode: RightPaneMode;
   onModeChange: (m: RightPaneMode) => void;
   visualizerSpec: VizSpec | null;
+  onRegenerateViz?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -344,7 +348,7 @@ function Header({
         </div>
 
         {/* Visualizer-mode shows the viz-type chip + title; other modes show the mode description */}
-        {mode === "visualizer" && visualizerSpec && (
+        {mode === "visualizer" && visualizerSpec && VIZ_TYPE_META[visualizerSpec.type] && (
           <span className="viz-type-chip" style={vizTypeStyle(visualizerSpec.type)}>
             {(() => {
               const Icon = VIZ_TYPE_META[visualizerSpec.type].Icon;
@@ -374,6 +378,26 @@ function Header({
               transition={{ duration: 0.12 }}
               className="absolute right-0 top-full z-20 mt-1.5 w-72 overflow-hidden rounded-lg border border-[var(--border-subtle)] bg-white shadow-[0_8px_24px_rgba(17,17,19,0.08)]"
             >
+              {mode === "visualizer" && onRegenerateViz && visualizerSpec && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onRegenerateViz();
+                    setMoreOpen(false);
+                  }}
+                  className="flex w-full items-start gap-2.5 px-3 py-2 text-left transition-colors hover:bg-[var(--surface-sunken)]"
+                >
+                  <RefreshCw className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--ink-500)]" />
+                  <div className="min-w-0">
+                    <p className="text-[12.5px] font-medium text-[var(--ink-900)]">
+                      Regenerate visualization
+                    </p>
+                    <p className="text-[11px] leading-relaxed text-[var(--ink-500)]">
+                      Create a fresh visualization for the current concept with a different approach.
+                    </p>
+                  </div>
+                </button>
+              )}
               <button
                 type="button"
                 onClick={downloadWorkContext}

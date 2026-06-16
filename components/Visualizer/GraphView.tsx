@@ -22,6 +22,20 @@ export default function GraphView({ spec, onRuntimeError }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [error, setError] = useState<string | null>(null);
   const reportedRef = useRef(false);
+  const [renderTrigger, setRenderTrigger] = useState(0);
+
+  useEffect(() => {
+    const cont = containerRef.current;
+    if (!cont) return;
+
+    const observer = new ResizeObserver(() => {
+      // Trigger re-render when container resizes
+      setRenderTrigger(prev => prev + 1);
+    });
+
+    observer.observe(cont);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     setError(null);
@@ -251,7 +265,7 @@ export default function GraphView({ spec, onRuntimeError }: Props) {
     // onRuntimeError captured by closure; we don't re-render the chart on
     // every parent rerender that produces a new function reference.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [spec]);
+  }, [spec, renderTrigger]);
 
   return (
     <div ref={containerRef} className="relative h-full w-full">
