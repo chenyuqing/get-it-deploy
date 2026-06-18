@@ -48,3 +48,6 @@ next-env.d.ts
 # staged codex binary per target — fetched on demand by electron-prepare
 /electron/codex-bin/
 snaps-mobile/
+
+# local data directory (portable across machines)
+/.getit-data/

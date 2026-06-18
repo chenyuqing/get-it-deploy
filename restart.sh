@@ -35,8 +35,13 @@ if [ -d "$PROJECT_DIR/.next" ]; then
   rm -rf "$PROJECT_DIR/.next"
 fi
 
+# Set data directory to project-local .getit-data for portability
+export GETIT_DATA_DIR="$PROJECT_DIR/.getit-data"
+mkdir -p "$GETIT_DATA_DIR"
+
 # Start server
 echo "Starting dev server on port $PORT..."
+echo "Data directory: $GETIT_DATA_DIR"
 
 LOG_DIR="$PROJECT_DIR/logs"
 mkdir -p "$LOG_DIR"
