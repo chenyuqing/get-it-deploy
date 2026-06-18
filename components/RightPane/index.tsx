@@ -29,6 +29,11 @@ import {
   MoreHorizontal,
   Download,
   RefreshCw,
+  Film,
+  Loader2,
+  CheckSquare,
+  Square,
+  Play,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -209,6 +214,21 @@ function Header({
   const [moreOpen, setMoreOpen] = useState(false);
   const moreRef = useRef<HTMLDivElement>(null);
   const [downloading, setDownloading] = useState(false);
+  const [exportingVideo, setExportingVideo] = useState(false);
+  const [exportVideoPhase, setExportVideoPhase] = useState<string | null>(null);
+  const [exportVideoDir, setExportVideoDir] = useState<string | null>(null);
+  const [exportSuccess, setExportSuccess] = useState(false);
+  // Tag selector state — shown after clicking "Export video" so the user
+  // can pick which concepts to include before the bridge runs.
+  const [tagSelectorOpen, setTagSelectorOpen] = useState(false);
+  const [availableTags, setAvailableTags] = useState<Array<{
+    id: string;
+    page: number;
+    label: string;
+    type: string;
+    ready: boolean;
+  }>>([]);
+  const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (!open) return;
@@ -267,12 +287,96 @@ function Header({
     }
   };
 
+  const openTagSelector = async () => {
+    // Reset any previous export state.
+    setExportSuccess(false);
+    setExportVideoDir(null);
+    // Fetch the tags from the server to show which ones are ready.
+    try {
+      setExportVideoPhase("Loading tags…");
+      const r = await fetch(`/api/tags/${docId}`);
+      if (!r.ok) throw new Error("Failed to load tags");
+      const data = await r.json();
+      const allTags: typeof availableTags = (data.file?.tags ?? []).map(
+        (t: { id: string; page: number; label: string; type: string; ready: boolean }) => ({
+          id: t.id,
+          page: t.page,
+          label: t.label,
+          type: t.type,
+          ready: t.ready,
+        }),
+      );
+      setAvailableTags(allTags);
+      // Pre-select all ready tags by default.
+      setSelectedTagIds(new Set(allTags.filter((t) => t.ready).map((t) => t.id)));
+      setTagSelectorOpen(true);
+      setExportVideoPhase(null);
+    } catch {
+      setExportVideoPhase("Could not load tags for selection.");
+    }
+  };
+
+  const toggleTag = (id: string) => {
+    setSelectedTagIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const selectAllReady = () => {
+    setSelectedTagIds(new Set(availableTags.filter((t) => t.ready).map((t) => t.id)));
+  };
+
+  const deselectAll = () => {
+    setSelectedTagIds(new Set());
+  };
+
+  const exportVideo = async () => {
+    const ids = Array.from(selectedTagIds);
+    if (ids.length === 0) {
+      setExportVideoPhase("No tags selected.");
+      return;
+    }
+    setTagSelectorOpen(false);
+    setExportingVideo(true);
+    setExportVideoPhase("Bridging selected visualizations to video scenes…");
+    try {
+      const r = await fetch(`/api/export-video/${docId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "file", maxCodexCalls: 10, tagIds: ids }),
+      });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+        throw new Error(err.error ?? `Export failed (${r.status})`);
+      }
+      const data = await r.json();
+      setExportVideoPhase(
+        `Generated ${data.sceneCount} scenes (~${data.totalDuration}s).` +
+        (data.codexCallsUsed > 0 ? ` Bridge calls: ${data.codexCallsUsed}.` : "")
+      );
+      setExportVideoDir(data.outputDir);
+      setExportSuccess(true);
+      // Don't auto-close — let the user copy the path / open the folder.
+    } catch (e) {
+      setExportVideoPhase(`Export failed: ${e instanceof Error ? e.message : "unknown error"}`);
+      setExportVideoDir(null);
+      setExportSuccess(false);
+      setTimeout(() => setMoreOpen(false), 8000);
+    } finally {
+      setExportingVideo(false);
+    }
+  };
+
   const current = MODES.find((m) => m.id === mode)!;
   const CurrentIcon = current.Icon;
 
-  // Subtitle: viz title when visualizer mode + spec, else mode description.
-  const subtitle =
-    mode === "visualizer" && visualizerSpec
+  // Subtitle: export progress takes priority, then viz title / mode description.
+  const subtitle = exportingVideo || tagSelectorOpen
+    ? (exportVideoPhase ?? (tagSelectorOpen ? "Select concepts to include" : "Exporting…"))
+    : mode === "visualizer" && visualizerSpec
       ? visualizerSpec.title
       : mode === "visualizer"
         ? "Pick a tag to begin"
@@ -397,6 +501,193 @@ function Header({
                     </p>
                   </div>
                 </button>
+              )}
+              {!tagSelectorOpen ? (
+                <button
+                  type="button"
+                  onClick={openTagSelector}
+                  disabled={exportingVideo}
+                  className="flex w-full items-start gap-2.5 px-3 py-2 text-left transition-colors hover:bg-[var(--surface-sunken)] disabled:opacity-60"
+                >
+                  <Film className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--ink-500)]" />
+                  <div className="min-w-0">
+                    <p className="text-[12.5px] font-medium text-[var(--ink-900)]">
+                      Export video (HyperFrames)
+                    </p>
+                    <p className="text-[11px] leading-relaxed text-[var(--ink-500)]">
+                      Pick which visualizations to include, then render to MP4.
+                    </p>
+                  </div>
+                </button>
+              ) : (
+                <div className="px-3 py-2">
+                  {/* Tag selector header */}
+                  <div className="mb-2 flex items-center justify-between">
+                    <p className="text-[12px] font-medium text-[var(--ink-900)]">
+                      Select concepts ({selectedTagIds.size} picked)
+                    </p>
+                    <div className="flex gap-1.5">
+                      <button
+                        type="button"
+                        onClick={selectAllReady}
+                        className="text-[10.5px] text-[var(--accent-600)] hover:underline"
+                      >
+                        All ready
+                      </button>
+                      <span className="text-[var(--ink-300)]">|</span>
+                      <button
+                        type="button"
+                        onClick={deselectAll}
+                        className="text-[10.5px] text-[var(--ink-500)] hover:underline"
+                      >
+                        None
+                      </button>
+                    </div>
+                  </div>
+                  {/* Tag list grouped by page */}
+                  <div className="max-h-40 overflow-y-auto space-y-0.5 mb-2">
+                    {(() => {
+                      // Group by page
+                      const grouped = new Map<number, typeof availableTags>();
+                      for (const t of availableTags) {
+                        const list = grouped.get(t.page) ?? [];
+                        list.push(t);
+                        grouped.set(t.page, list);
+                      }
+                      return Array.from(grouped.entries())
+                        .sort(([a], [b]) => a - b)
+                        .map(([page, pageTags]) => (
+                          <div key={page}>
+                            <p className="text-[10px] font-medium text-[var(--ink-400)] mt-1 mb-0.5">
+                              Page {page + 1}
+                            </p>
+                            {pageTags.map((t) => (
+                              <button
+                                key={t.id}
+                                type="button"
+                                onClick={() => t.ready && toggleTag(t.id)}
+                                disabled={!t.ready}
+                                className={`flex w-full items-center gap-1.5 rounded px-1.5 py-0.5 text-left text-[11.5px] transition-colors ${
+                                  !t.ready
+                                    ? "opacity-40 cursor-not-allowed"
+                                    : "cursor-pointer hover:bg-[var(--surface-sunken)]"
+                                }`}
+                              >
+                                {selectedTagIds.has(t.id) ? (
+                                  <CheckSquare className="h-3 w-3 shrink-0 text-[var(--accent-600)]" />
+                                ) : (
+                                  <Square className="h-3 w-3 shrink-0 text-[var(--ink-300)]" />
+                                )}
+                                <span className="truncate">
+                                  {t.label}
+                                  {!t.ready && (
+                                    <span className="ml-1 text-[10px] text-[var(--ink-400)]">
+                                      (not ready)
+                                    </span>
+                                  )}
+                                </span>
+                                <span className="ml-auto shrink-0 text-[10px] text-[var(--ink-400)]">
+                                  {t.type}
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        ));
+                    })()}
+                  </div>
+                  {/* Action buttons */}
+                  <div className="flex gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTagSelectorOpen(false);
+                        setExportVideoPhase(null);
+                      }}
+                      className="flex-1 rounded-md border border-[var(--border-subtle)] px-2 py-1 text-[11px] font-medium text-[var(--ink-500)] hover:bg-[var(--surface-sunken)]"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={exportVideo}
+                      disabled={selectedTagIds.size === 0}
+                      className="flex flex-1 items-center justify-center gap-1 rounded-md bg-[var(--accent-600)] px-2 py-1 text-[11px] font-medium text-white hover:bg-[var(--accent-700)] disabled:opacity-40"
+                    >
+                      <Play className="h-3 w-3" />
+                      Export {selectedTagIds.size} tag{selectedTagIds.size !== 1 ? "s" : ""}
+                    </button>
+                  </div>
+                </div>
+              )}
+              {/* Progress + result while export is running or completed */}
+              {(exportingVideo || exportSuccess || (exportVideoPhase && !tagSelectorOpen)) && (
+                <div className={`px-3 py-2 border-t ${exportSuccess ? "border-emerald-200 bg-emerald-50" : exportVideoPhase?.startsWith("Export failed") ? "border-red-200 bg-red-50" : "border-[var(--border-subtle)]"}`}>
+                  <div className="flex items-center gap-2">
+                    {exportingVideo ? (
+                      <Loader2 className="h-3 w-3 shrink-0 animate-spin text-[var(--accent-600)]" />
+                    ) : exportSuccess ? (
+                      <CheckSquare className="h-3 w-3 shrink-0 text-emerald-600" />
+                    ) : (
+                      <span className="text-[11px]">⚠️</span>
+                    )}
+                    <p className={`text-[11.5px] font-medium ${exportSuccess ? "text-emerald-800" : exportVideoPhase?.startsWith("Export failed") ? "text-red-800" : "text-[var(--ink-900)]"}`}>
+                      {exportVideoPhase ?? "Exporting…"}
+                    </p>
+                  </div>
+                  {exportSuccess && exportVideoDir && (
+                    <>
+                      <p className="mt-1.5 text-[11px] text-emerald-700">
+                        HTML written. Run this command to render MP4:
+                      </p>
+                      <div className="mt-1 flex items-center gap-1">
+                        <code className="flex-1 rounded bg-emerald-100 px-1.5 py-0.5 text-[10.5px] font-mono text-emerald-900 break-all select-all">
+                          cd "{exportVideoDir}" && npx hyperframes render . -o output.mp4
+                        </code>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(
+                              `cd "${exportVideoDir}" && npx hyperframes render . -o output.mp4`
+                            ).catch(() => {});
+                          }}
+                          className="shrink-0 rounded bg-white px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 border border-emerald-200 hover:bg-emerald-100"
+                        >
+                          Copy
+                        </button>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          fetch("/api/shell/open", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ path: exportVideoDir }),
+                          }).catch(() => {});
+                          // Fallback: if the API doesn't exist, try the Electron shell
+                          if (typeof window !== "undefined" && (window as any).__electronShell) {
+                            (window as any).__electronShell.openPath(exportVideoDir);
+                          }
+                        }}
+                        className="mt-1.5 text-[10.5px] text-emerald-700 hover:underline"
+                      >
+                        Open folder in Finder
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setExportVideoPhase(null);
+                          setExportVideoDir(null);
+                          setExportSuccess(false);
+                          setExportingVideo(false);
+                          setMoreOpen(false);
+                        }}
+                        className="mt-1.5 ml-2 text-[10.5px] text-[var(--ink-400)] hover:underline"
+                      >
+                        Dismiss
+                      </button>
+                    </>
+                  )}
+                </div>
               )}
               <button
                 type="button"
