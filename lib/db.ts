@@ -4,7 +4,7 @@
  * Uses connection pooling in production (Vercel) and regular client in dev.
  */
 
-import { PrismaClient } from '../generated/prisma'
+import { PrismaClient } from '@prisma/client'
 
 const globalForPrisma = global as unknown as { prisma: PrismaClient }
 

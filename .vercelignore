@@ -1,0 +1,41 @@
+# Dependencies (Vercel runs npm install)
+node_modules
+
+# Local data directory
+.getit-data
+
+# Electron-specific files (not needed for web deployment)
+electron
+dist-electron
+electron/codex-bin
+
+# Build outputs (Vercel rebuilds)
+.next
+out
+build
+
+# Testing and debug
+coverage
+smoke-out
+scripts/smoke-out
+
+# Logs
+logs
+*.log
+
+# Development
+.DS_Store
+*.pem
+.env*
+!.env.example
+
+# Git
+.git
+.gitignore
+
+# IDE
+.vscode
+.idea
+
+# Misc large files
+snaps-mobile

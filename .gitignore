@@ -52,4 +52,4 @@ snaps-mobile/
 # local data directory (portable across machines)
 /.getit-data/
 
-/lib/generated/prisma
+/lib/generated/client

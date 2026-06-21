@@ -30,7 +30,7 @@ export default async function SharePage({ params }: Props) {
   }
 
   // Filter tags to only those included in the share
-  const sharedTags = share.document.tags.filter(tag =>
+  const sharedTags = share.document.tags.filter((tag: { id: string }) =>
     share.tagIds.includes(tag.id)
   )
 
@@ -40,7 +40,7 @@ export default async function SharePage({ params }: Props) {
         filename: share.document.filename,
         numPages: share.document.numPages || 0
       }}
-      tags={sharedTags.map(tag => ({
+      tags={sharedTags.map((tag: any) => ({
         id: tag.id,
         label: tag.label,
         page: tag.page,

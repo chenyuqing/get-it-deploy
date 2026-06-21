@@ -60,8 +60,11 @@ export const CODEX_SCRATCH_DIR = path.join(DATA_DIR, "codex-scratch");
 
 // Eagerly ensure the top-level directories exist. fs.mkdirSync with
 // recursive:true is a no-op when they're already there.
-fs.mkdirSync(DOCS_DIR, { recursive: true });
-fs.mkdirSync(CODEX_SCRATCH_DIR, { recursive: true });
+// Skip in Vercel serverless environment (read-only filesystem)
+if (process.env.VERCEL !== '1') {
+  fs.mkdirSync(DOCS_DIR, { recursive: true });
+  fs.mkdirSync(CODEX_SCRATCH_DIR, { recursive: true });
+}
 
 export function docDir(docId: string): string {
   return path.join(DOCS_DIR, docId);

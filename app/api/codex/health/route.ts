@@ -1,16 +1,16 @@
 /**
  * GET /api/codex/health
  *
- * Lightweight status read for the in-app banner. Returns the current
- * Codex-health snapshot from lib/codex.ts. No Codex call is made; this
- * is safe to poll at a fast cadence.
+ * Lightweight status read for the in-app banner. Returns a simple health
+ * status. In cloud deployment, always returns healthy since Codex runs
+ * client-side via custom API.
  */
 
 import { NextResponse } from "next/server";
-import { getCodexHealth } from "@/lib/codex";
 
 export const runtime = "nodejs";
 
 export async function GET() {
-  return NextResponse.json(getCodexHealth());
+  // In cloud deployment, we don't use local Codex binary
+  return NextResponse.json({ ok: true });
 }

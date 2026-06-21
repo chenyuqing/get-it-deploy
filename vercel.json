@@ -4,17 +4,5 @@
   "devCommand": "npm run browser:dev",
   "installCommand": "npm install",
   "framework": "nextjs",
-  "regions": ["hkg1"],
-  "env": {
-    "DATABASE_URL": "@database_url",
-    "SUPABASE_URL": "@supabase_url",
-    "SUPABASE_ANON_KEY": "@supabase_anon_key",
-    "SUPABASE_SERVICE_ROLE_KEY": "@supabase_service_role_key",
-    "CUSTOM_API_BASE_URL": "@custom_api_base_url",
-    "CUSTOM_API_KEY": "@custom_api_key",
-    "CUSTOM_MODEL": "@custom_model",
-    "USER_PASSWORDS": "@user_passwords",
-    "NEXTAUTH_SECRET": "@nextauth_secret",
-    "NEXTAUTH_URL": "@nextauth_url"
-  }
+  "regions": ["hkg1"]
 }

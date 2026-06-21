@@ -1,87 +1,120 @@
-"use client"
+'use client'
 
-import { useState } from "react"
-import { signIn } from "next-auth/react"
-import { useRouter } from "next/navigation"
+import { useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 
-export default function LoginPage() {
-  const [username, setUsername] = useState("")
-  const [password, setPassword] = useState("")
-  const [error, setError] = useState("")
+export default function SimpleLoginPage() {
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const router = useRouter()
+  const searchParams = useSearchParams()
 
-  async function handleSubmit(e: React.FormEvent) {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setError("")
+    setError('')
     setLoading(true)
 
     try {
-      const result = await signIn("credentials", {
-        username,
-        password,
-        redirect: false,
+      const res = await fetch('/api/auth/simple', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
       })
 
-      if (result?.error) {
-        setError("Invalid username or password")
-        setLoading(false)
-        return
-      }
+      const data = await res.json()
 
-      router.push("/library")
-      router.refresh()
-    } catch (err) {
-      setError("Login failed. Please try again.")
+      if (res.ok && data.success) {
+        const callbackUrl = searchParams.get('callbackUrl') || '/library'
+        router.push(callbackUrl)
+        router.refresh()
+      } else {
+        setError(data.error || 'Invalid password')
+      }
+    } catch (err: any) {
+      setError(err.message || 'Login failed')
+    } finally {
       setLoading(false)
     }
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[#F6F1E8]">
-      <div className="w-full max-w-md space-y-8 rounded-2xl bg-white p-8 shadow-lg">
-        <div className="text-center">
-          <h1 className="text-3xl font-bold text-[#1F2421]">Get It</h1>
-          <p className="mt-2 text-sm text-[#8A8A80]">
-            Sign in to access your documents
-          </p>
-        </div>
+    <div style={{
+      minHeight: '100vh',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      background: '#F6F1E8',
+      fontFamily: 'Inter, sans-serif'
+    }}>
+      <div style={{
+        background: '#FBF7EF',
+        padding: '48px',
+        borderRadius: '12px',
+        boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+        maxWidth: '420px',
+        width: '100%'
+      }}>
+        <h1 style={{
+          fontSize: '32px',
+          fontWeight: '700',
+          color: '#1F2421',
+          marginBottom: '8px',
+          fontFamily: '"DM Serif Display", serif'
+        }}>
+          Get It
+        </h1>
+        <p style={{
+          color: '#8A8A80',
+          marginBottom: '32px',
+          fontSize: '15px'
+        }}>
+          Enter password to continue
+        </p>
 
-        <form onSubmit={handleSubmit} className="mt-8 space-y-6">
-          <div className="space-y-4">
-            <div>
-              <label htmlFor="username" className="block text-sm font-medium text-[#1F2421]">
-                Username
-              </label>
-              <input
-                id="username"
-                type="text"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                required
-                className="mt-1 block w-full rounded-lg border border-[#E2D9C8] px-3 py-2 text-[#1F2421] placeholder-[#8A8A80] focus:border-[#C8853F] focus:outline-none focus:ring-1 focus:ring-[#C8853F]"
-                placeholder="Enter your username"
-              />
-            </div>
-
-            <div>
-              <label htmlFor="password" className="block text-sm font-medium text-[#1F2421]">
-                Password
-              </label>
-              <input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                className="mt-1 block w-full rounded-lg border border-[#E2D9C8] px-3 py-2 text-[#1F2421] placeholder-[#8A8A80] focus:border-[#C8853F] focus:outline-none focus:ring-1 focus:ring-[#C8853F]"
-                placeholder="Enter your password"
-              />
-            </div>
+        <form onSubmit={handleSubmit}>
+          <div style={{ marginBottom: '24px' }}>
+            <label style={{
+              display: 'block',
+              marginBottom: '8px',
+              color: '#1F2421',
+              fontSize: '14px',
+              fontWeight: '500'
+            }}>
+              Password
+            </label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              autoFocus
+              style={{
+                width: '100%',
+                padding: '12px 16px',
+                border: '1px solid #E2D9C8',
+                borderRadius: '8px',
+                fontSize: '15px',
+                background: '#FFFFFF',
+                color: '#1F2421',
+                outline: 'none',
+                transition: 'border-color 0.2s'
+              }}
+              onFocus={(e) => e.target.style.borderColor = '#C8853F'}
+              onBlur={(e) => e.target.style.borderColor = '#E2D9C8'}
+            />
           </div>
 
           {error && (
-            <div className="rounded-lg bg-red-50 p-3 text-sm text-red-800">
+            <div style={{
+              padding: '12px',
+              background: '#FEE',
+              border: '1px solid #FCC',
+              borderRadius: '8px',
+              marginBottom: '24px',
+              color: '#C00',
+              fontSize: '14px'
+            }}>
               {error}
             </div>
           )}
@@ -89,14 +122,36 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full rounded-lg bg-[#C8853F] px-4 py-2 text-white font-medium transition hover:bg-[#A86B2C] disabled:opacity-50 disabled:cursor-not-allowed"
+            style={{
+              width: '100%',
+              padding: '12px',
+              background: loading ? '#8A8A80' : '#C8853F',
+              color: '#FFFFFF',
+              border: 'none',
+              borderRadius: '8px',
+              fontSize: '15px',
+              fontWeight: '600',
+              cursor: loading ? 'not-allowed' : 'pointer',
+              transition: 'all 0.2s'
+            }}
+            onMouseEnter={(e) => {
+              if (!loading) e.currentTarget.style.background = '#A86B2C'
+            }}
+            onMouseLeave={(e) => {
+              if (!loading) e.currentTarget.style.background = '#C8853F'
+            }}
           >
-            {loading ? "Signing in..." : "Sign in"}
+            {loading ? 'Signing in...' : 'Sign in'}
           </button>
         </form>
 
-        <p className="text-center text-xs text-[#8A8A80]">
-          Contact your admin for access
+        <p style={{
+          marginTop: '24px',
+          fontSize: '13px',
+          color: '#8A8A80',
+          textAlign: 'center'
+        }}>
+          Data is stored locally in your browser
         </p>
       </div>
     </div>
