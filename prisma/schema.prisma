@@ -1,0 +1,75 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// 用户表
+model User {
+  id        String     @id @default(cuid())
+  username  String     @unique
+  name      String?
+  createdAt DateTime   @default(now())
+  documents Document[]
+}
+
+// 文档表
+model Document {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  filename     String
+  pdfUrl       String   // Supabase Storage URL
+  uploadedAt   DateTime @default(now())
+  numPages     Int?
+  lastOpenedAt DateTime?
+
+  // 关联数据
+  extractedJson Json?    // PDF 提取的文本
+  kgJson        Json?    // 知识图谱
+  workCtxJson   Json?    // 聊天/闪卡/测验记录
+
+  tags   Tag[]
+  shares Share[]
+
+  @@index([userId])
+}
+
+// 标签/可视化表
+model Tag {
+  id         String   @id @default(cuid())
+  documentId String
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  label      String
+  page       Int
+  concept    Json     // { context: string, field: string }
+  spec       Json?    // VizSpec - 可视化定义
+  ready      Boolean  @default(false)
+  isPublic   Boolean  @default(false)
+
+  createdAt  DateTime @default(now())
+
+  @@index([documentId])
+}
+
+// 分享表
+model Share {
+  id         String   @id @default(cuid())
+  documentId String
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  shareCode  String   @unique
+  tagIds     String[] // 分享的标签 ID 列表
+  createdAt  DateTime @default(now())
+
+  @@index([shareCode])
+}
