@@ -144,18 +144,23 @@ export async function POST(req: Request) {
   }
 
   const docId = presetDocId ?? newDocId();
-  ensureDocDir(docId);
-  await fs.writeFile(pdfPath(docId), buffer);
-  const pdfUrl = `/api/pdf/${docId}`;
 
-  saveDoc({
-    id: docId,
-    filename,
-    uploadedAt: Date.now(),
-    numPages: extracted.numPages,
-    extracted,
-    pdfUrl,
-  });
+  // In Vercel serverless environment, skip file writes (read-only filesystem)
+  // Data will be stored in browser localStorage instead
+  if (process.env.VERCEL !== '1') {
+    ensureDocDir(docId);
+    await fs.writeFile(pdfPath(docId), buffer);
+    saveDoc({
+      id: docId,
+      filename,
+      uploadedAt: Date.now(),
+      numPages: extracted.numPages,
+      extracted,
+      pdfUrl: `/api/pdf/${docId}`,
+    });
+  }
+
+  const pdfUrl = `/api/pdf/${docId}`;
 
   return NextResponse.json({
     docId,
@@ -168,5 +173,7 @@ export async function POST(req: Request) {
       height: p.height,
       text: p.text,
     })),
+    // In Vercel environment, return PDF data for browser storage
+    pdfData: process.env.VERCEL === '1' ? buffer.toString('base64') : undefined,
   });
 }
