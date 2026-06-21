@@ -77,6 +77,18 @@ function writeIndex(docs: DocMeta[]): void {
 }
 
 export function listDocs(): DocMeta[] {
+  // In Vercel serverless, read from in-memory store only
+  if (process.env.VERCEL === '1') {
+    const docs: DocMeta[] = Array.from(store.values()).map(entry => ({
+      id: entry.id,
+      filename: entry.filename,
+      uploadedAt: entry.uploadedAt,
+      numPages: entry.numPages,
+      lastOpenedAt: entry.lastOpenedAt,
+    }));
+    return docs.sort((a, b) => b.uploadedAt - a.uploadedAt);
+  }
+
   // Sort newest first so the Library renders in reverse-chronological order.
   return readIndex().slice().sort((a, b) => b.uploadedAt - a.uploadedAt);
 }
@@ -97,6 +109,13 @@ function removeFromIndex(docId: string): void {
 // ── Save / load / delete ───────────────────────────────────────────────
 
 export function saveDoc(entry: StoreEntry): void {
+  // In Vercel serverless, skip file writes (read-only filesystem)
+  // Data persistence handled by browser localStorage instead
+  if (process.env.VERCEL === '1') {
+    store.set(entry.id, entry);
+    return;
+  }
+
   ensureDocDir(entry.id);
   const meta: DocMeta = {
     id: entry.id,
