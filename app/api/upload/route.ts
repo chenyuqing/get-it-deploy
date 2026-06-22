@@ -63,6 +63,18 @@ function rejectResponse(reason: PdfRejectReason, stats?: PdfQualityStats) {
 }
 
 export async function POST(req: Request) {
+  try {
+    return await handleUpload(req);
+  } catch (error) {
+    console.error('[upload] Fatal error:', error);
+    return NextResponse.json({
+      error: error instanceof Error ? error.message : 'Upload failed',
+      stack: error instanceof Error ? error.stack : undefined,
+    }, { status: 500 });
+  }
+}
+
+async function handleUpload(req: Request) {
   let buffer: Buffer;
   let filename = "uploaded.pdf";
   let presetDocId: string | null = null;
