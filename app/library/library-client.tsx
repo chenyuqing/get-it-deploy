@@ -69,6 +69,30 @@ export default function LibraryClient() {
   const reload = useCallback(async () => {
     setError(null);
     try {
+      // In browser with localStorage support, read directly from localStorage
+      if (typeof window !== 'undefined' && window.localStorage) {
+        const docsIndexKey = 'getit:docs';
+        const docsRaw = localStorage.getItem(docsIndexKey);
+        const docs = docsRaw ? JSON.parse(docsRaw) : [];
+
+        const rows: LibraryRow[] = docs.map((d: any) => ({
+          id: d.id,
+          filename: d.filename,
+          uploadedAt: d.uploadedAt,
+          numPages: d.numPages,
+          lastActivityAt: d.lastOpenedAt ?? d.uploadedAt,
+          kgStatus: "missing" as const,
+          kgEvaluationCount: 0,
+          tagsAnalyzedPages: null,
+          tagsTotal: null,
+          tagsReady: null,
+        }));
+
+        setRows(rows);
+        return;
+      }
+
+      // Fallback to API for non-browser or server-side storage
       const r = await fetch("/api/library", { cache: "no-store" });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const j = (await r.json()) as { docs: LibraryRow[] };
@@ -118,6 +142,23 @@ export default function LibraryClient() {
       }
       setDeleting(id);
       try {
+        // Delete from localStorage if available
+        if (typeof window !== 'undefined' && window.localStorage) {
+          localStorage.removeItem(`getit:doc:${id}:meta`);
+          localStorage.removeItem(`getit:doc:${id}:pdf`);
+          localStorage.removeItem(`getit:doc:${id}:extracted`);
+
+          // Update docs index
+          const docsIndexKey = 'getit:docs';
+          const docsRaw = localStorage.getItem(docsIndexKey);
+          if (docsRaw) {
+            const docs = JSON.parse(docsRaw);
+            const filtered = docs.filter((d: any) => d.id !== id);
+            localStorage.setItem(docsIndexKey, JSON.stringify(filtered));
+          }
+        }
+
+        // Also call API for server-side storage (fallback)
         const r = await fetch(`/api/library?id=${encodeURIComponent(id)}`, {
           method: "DELETE",
         });

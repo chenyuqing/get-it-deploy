@@ -125,6 +125,45 @@ export default function UploadCard() {
         const r = await fetch("/api/upload", { method: "POST", body: fd });
         if (!r.ok) throw new Error((await r.json()).error ?? "upload failed");
         const j = await r.json();
+
+        // Save to localStorage if pdfData is returned (Vercel deployment)
+        if (j.pdfData && typeof window !== 'undefined') {
+          const doc = {
+            id: j.docId,
+            filename: j.filename,
+            uploadedAt: Date.now(),
+            numPages: j.numPages,
+            extracted: {
+              numPages: j.numPages,
+              pages: j.pages,
+            },
+            pdfUrl: j.pdfUrl,
+          };
+
+          localStorage.setItem(`getit:doc:${j.docId}:meta`, JSON.stringify({
+            id: doc.id,
+            filename: doc.filename,
+            uploadedAt: doc.uploadedAt,
+            numPages: doc.numPages,
+          }));
+          localStorage.setItem(`getit:doc:${j.docId}:extracted`, JSON.stringify(doc.extracted));
+          localStorage.setItem(`getit:doc:${j.docId}:pdf`, j.pdfData);
+
+          const docsIndexKey = 'getit:docs';
+          const docsRaw = localStorage.getItem(docsIndexKey);
+          const docs = docsRaw ? JSON.parse(docsRaw) : [];
+          const existing = docs.findIndex((d: any) => d.id === j.docId);
+          if (existing < 0) {
+            docs.push({
+              id: doc.id,
+              filename: doc.filename,
+              uploadedAt: doc.uploadedAt,
+              numPages: doc.numPages,
+            });
+            localStorage.setItem(docsIndexKey, JSON.stringify(docs));
+          }
+        }
+
         router.push(`/viewer/${j.docId}`);
       } catch (e) {
         setError((e as Error).message);
@@ -148,6 +187,44 @@ export default function UploadCard() {
         const r = await fetch("/api/upload", { method: "POST", body: fd });
         if (!r.ok) throw new Error((await r.json()).error ?? "upload failed");
         const j = await r.json();
+
+        // Save to localStorage if pdfData is returned (Vercel deployment)
+        if (j.pdfData && typeof window !== 'undefined') {
+          const doc = {
+            id: j.docId,
+            filename: j.filename,
+            uploadedAt: Date.now(),
+            numPages: j.numPages,
+            extracted: {
+              numPages: j.numPages,
+              pages: j.pages,
+            },
+            pdfUrl: j.pdfUrl,
+          };
+
+          // Save document metadata and extracted data
+          localStorage.setItem(`getit:doc:${j.docId}:meta`, JSON.stringify({
+            id: doc.id,
+            filename: doc.filename,
+            uploadedAt: doc.uploadedAt,
+            numPages: doc.numPages,
+          }));
+          localStorage.setItem(`getit:doc:${j.docId}:extracted`, JSON.stringify(doc.extracted));
+          localStorage.setItem(`getit:doc:${j.docId}:pdf`, j.pdfData);
+
+          // Update docs index
+          const docsIndexKey = 'getit:docs';
+          const docsRaw = localStorage.getItem(docsIndexKey);
+          const docs = docsRaw ? JSON.parse(docsRaw) : [];
+          docs.push({
+            id: doc.id,
+            filename: doc.filename,
+            uploadedAt: doc.uploadedAt,
+            numPages: doc.numPages,
+          });
+          localStorage.setItem(docsIndexKey, JSON.stringify(docs));
+        }
+
         router.push(`/viewer/${j.docId}`);
       } catch (e) {
         setError((e as Error).message);

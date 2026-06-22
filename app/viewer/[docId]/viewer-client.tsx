@@ -198,17 +198,48 @@ export default function ViewerClient({ docId }: { docId: string }) {
   useEffect(() => {
     let cancelled = false;
     // Doc meta — without it the PdfViewer can't render.
-    fetch(`/api/doc/${docId}`)
-      .then(async (r) => {
-        if (!r.ok) {
-          throw new Error(
-            r.status === 404
-              ? "This document is no longer in memory. Please re-upload from the home page."
-              : `Could not load document (HTTP ${r.status})`,
-          );
+    // Try localStorage first (Vercel deployment), fallback to API
+    const loadDocMeta = async () => {
+      // Check localStorage first
+      if (typeof window !== 'undefined' && window.localStorage) {
+        const metaRaw = localStorage.getItem(`getit:doc:${docId}:meta`);
+        const extractedRaw = localStorage.getItem(`getit:doc:${docId}:extracted`);
+        const pdfData = localStorage.getItem(`getit:doc:${docId}:pdf`);
+
+        if (metaRaw && extractedRaw && pdfData) {
+          const meta = JSON.parse(metaRaw);
+          const extracted = JSON.parse(extractedRaw);
+
+          // Create blob URL from base64 PDF data
+          const pdfBytes = Uint8Array.from(atob(pdfData), c => c.charCodeAt(0));
+          const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+          const blobUrl = URL.createObjectURL(blob);
+
+          const docMeta: DocMeta = {
+            docId: meta.id,
+            filename: meta.filename,
+            pdfUrl: blobUrl,
+            numPages: extracted.numPages,
+            pages: extracted.pages,
+          };
+
+          return docMeta;
         }
-        return (await r.json()) as DocMeta;
-      })
+      }
+
+      // Fallback to API
+      const r = await fetch(`/api/doc/${docId}`);
+      if (!r.ok) {
+        throw new Error(
+          r.status === 404
+            ? "This document is no longer in memory. Please re-upload from the home page."
+            : `Could not load document (HTTP ${r.status})`,
+        );
+      }
+      return (await r.json()) as DocMeta;
+    };
+
+    loadDocMeta()
       .then((m) => {
         if (!cancelled) setMeta(m);
       })
